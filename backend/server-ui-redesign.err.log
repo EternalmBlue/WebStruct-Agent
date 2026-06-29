@@ -1,0 +1,155 @@
+INFO:     Started server process [30228]
+INFO:     Waiting for application startup.
+ERROR:    Traceback (most recent call last):
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 144, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3319, in raw_connection
+    return self.pool.connect()
+           ^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 448, in connect
+    return _ConnectionFairy._checkout(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1272, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 712, in checkout
+    rec = pool._do_get()
+          ^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 178, in _do_get
+    with util.safe_reraise():
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 122, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 176, in _do_get
+    return self._create_connection()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 389, in _create_connection
+    return _ConnectionRecord(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 674, in __init__
+    self.__connect()
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 122, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 667, in connect
+    return dialect.connect(*cargs_tup, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 630, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)  # type: ignore[no-any-return]  # NOQA: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\psycopg\connection.py", line 130, in connect
+    raise new_ex.with_traceback(None)
+psycopg.errors.ConnectionTimeout: connection timeout expired
+Multiple connection attempts failed. All failures were:
+- host: 'localhost', port: 5432, hostaddr: '127.0.0.1': connection timeout expired
+- host: 'localhost', port: 5432, hostaddr: '::1': connection timeout expired
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\starlette\routing.py", line 638, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "C:\Users\myx\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\fastapi\routing.py", line 225, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\myx\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\fastapi\routing.py", line 225, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\myx\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\fastapi\routing.py", line 225, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\myx\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\fastapi\routing.py", line 225, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\myx\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\fastapi\routing.py", line 225, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "C:\Users\myx\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\app\main.py", line 18, in lifespan
+    init_storage()
+  File "F:\WebStruct-Agent\backend\app\storage\database.py", line 33, in init_storage
+    run_auto_migrations(engine)
+  File "F:\WebStruct-Agent\backend\app\storage\migrations.py", line 19, in run_auto_migrations
+    Base.metadata.create_all(bind=engine)
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\sql\schema.py", line 5930, in create_all
+    bind._run_ddl_visitor(
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3269, in _run_ddl_visitor
+    with self.begin() as conn:
+  File "C:\Users\myx\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 137, in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3259, in begin
+    with self.connect() as conn:
+         ^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3295, in connect
+    return self._connection_cls(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 146, in __init__
+    Connection._handle_dbapi_exception_noconnection(
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 2450, in _handle_dbapi_exception_noconnection
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 144, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3319, in raw_connection
+    return self.pool.connect()
+           ^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 448, in connect
+    return _ConnectionFairy._checkout(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1272, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 712, in checkout
+    rec = pool._do_get()
+          ^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 178, in _do_get
+    with util.safe_reraise():
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 122, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 176, in _do_get
+    return self._create_connection()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 389, in _create_connection
+    return _ConnectionRecord(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 674, in __init__
+    self.__connect()
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 122, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 667, in connect
+    return dialect.connect(*cargs_tup, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 630, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)  # type: ignore[no-any-return]  # NOQA: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\WebStruct-Agent\backend\.venv\Lib\site-packages\psycopg\connection.py", line 130, in connect
+    raise new_ex.with_traceback(None)
+sqlalchemy.exc.OperationalError: (psycopg.errors.ConnectionTimeout) connection timeout expired
+Multiple connection attempts failed. All failures were:
+- host: 'localhost', port: 5432, hostaddr: '127.0.0.1': connection timeout expired
+- host: 'localhost', port: 5432, hostaddr: '::1': connection timeout expired
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+
+ERROR:    Application startup failed. Exiting.
