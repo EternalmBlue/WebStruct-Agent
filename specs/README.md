@@ -25,6 +25,7 @@ specs/
     ├── spec-assistant-center.feature
     ├── observability-center.feature
     ├── configuration-center.feature
+    ├── generalized-extraction.feature
     └── ui-workbench.feature
 ```
 
@@ -46,8 +47,10 @@ specs/
 
 ## 当前变更约束
 
-本轮规范已完成实现同步。后续新增或修改能力仍必须先更新 `.feature`、行为测试
-与能力索引，再修改 `backend/`、`frontend/` 或平台代码。
+当前规范包含已实现契约与阶段性待实现契约。后续新增或修改能力仍必须先更新
+`.feature`、行为测试与能力索引，再修改 `backend/`、`frontend/` 或平台代码。
+`generalized-extraction.feature` 是泛化单页抽取的阶段 1 红灯契约，进入实现前
+必须先补齐其步骤绑定。
 
 ## 统一设计原则
 

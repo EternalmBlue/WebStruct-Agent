@@ -64,11 +64,13 @@ backend/app/
     evaluation_center/    五种方法对比评测与指标报告
     review_center/        人工复核回写与程序登记
     spec_assistant_center/对话式 Schema/ProgramSpec 修订
+    rsi_center/           监督迭代评估、可比性校验与人工回滚记录
   platform/     跨中心复用的技术能力
     config.py           运行时配置与模型凭据
     persistence/        引擎、自动迁移、ORM 模型、通用 JSON 载荷读写
     llm/                ModelAdapter 协议及其实现（未配置时显式失败）
     tracing/            统一的图节点追踪执行器
+    observability/      任务事件、指标来源、指纹与窗口聚合
     text_processing.py  文本归一化与证据片段处理
 ```
 
@@ -229,6 +231,24 @@ Invoke-RestMethod `
 Use `GET /api/runs/{task_id}` and `GET /api/runs/{task_id}/events?after_cursor=...`
 for progress, then `GET /api/extract/{task_id}` for the terminal result.
 
+运行诊断与 RSI 评估：
+
+```text
+GET  /api/runs/{task_id}/metrics
+GET  /api/observability/summary?hours=24
+POST /api/rsi/iterations
+GET  /api/rsi/iterations/{iteration_id}
+POST /api/rsi/iterations/{iteration_id}/rollback
+```
+
+指标响应会标记 `measured`、`estimated` 或 `unavailable`，并保留采集分类、CloakBrowser
+启动/导航探针、节点耗时、队列等待、证据覆盖率、置信度、修复结果和模型 Token 来源。
+RSI 只比较同一页面快照与 Schema 指纹的已完成抽取运行；阻断、拒绝和人工回滚都会持久化，
+不会修改原始运行或自动部署规则。
+RSI 评估版本 2 使用 `0.5 * verification_score + 0.3 * field_completion_rate +
+0.2 * evidence_coverage` 质量代理，不声称标注准确率。关键指标缺失或版本不兼容
+会阻断比较；完整性、证据或必填缺失退化会拒绝候选。
+
 Revise the current task's SchemaSpec and ProgramSpec with the spec assistant:
 
 ```powershell
@@ -300,6 +320,39 @@ cd frontend
 npm run build
 ```
 
+Opt-in browser smoke checks (start backend and frontend using the local TOML ports first):
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m tests.support.rsi_browser_smoke
+.\.venv\Scripts\python.exe -m tests.support.rsi_live_smoke
+```
+
+The first checks desktop/mobile diagnostics with the pinned CloakBrowser. The second
+checks a locally controlled page and makes one bounded MineBBS request. It stops at
+access restrictions and never solves challenges. Neither smoke requires model credentials.
+The collector waits `[browser].post_navigation_wait_ms = 10000` once after
+`goto`, allowing CloakBrowser normal navigation and redirects to finish before
+the DOM and final main-document response are read. Set it to `0` to disable the
+wait. The configured/measured wait, initial/final status, and response count are
+retained. No persistent profile, fingerprint, UA override, retry navigation, or
+challenge interaction is introduced. Challenge-provider markup is not inspected;
+HTTP status and generic visible-content checks remain the only classification
+signals. Legacy challenge wait keys remain accepted for compatibility but do not
+drive collection.
+
+The fixed MineBBS resource experiment is available at
+`backend/tests/support/resource_validation_smoke.py`; it uses only the ten
+manually selected URLs and never discovers, downloads, purchases, or logs in.
+The observed DOM structure is documented in `specs/minebbs-resource-structure.md`.
+Use `--output <report.json>` to retain the UTF-8 report and
+`--replay-report <report.json>` to compare the retained exact snapshots without
+revisiting MineBBS. The experiment-only reference ProgramSpec is not a built-in
+domain template; it is compared against current model-generated rules, not human gold.
+RSI thresholds live in `[rsi]`: `min_quality_delta` defaults to `0.01` and
+`max_latency_regression_ratio` defaults to `0.2`. The protocol is documented in
+[`specs/rsi-protocol.md`](./specs/rsi-protocol.md).
+
 ## Current Stage
 
 Stage 4 is a thesis-ready local demo foundation:
@@ -321,10 +374,12 @@ Stage 4 is a thesis-ready local demo foundation:
 - Docker Compose packaging with healthcheck-gated startup
 - benchmark workflow with the required benchmark nodes and five comparison methods
 - React extraction workbench with schema selection/editing, schema validation, URL/HTML input, results, evidence, verification report, agent trace, and benchmark table
+- React workbench with live run snapshots, incremental event polling, browser/collection diagnostics,
+  latency and evidence metrics, token provenance, and RSI iteration status
 - manual review API and frontend panel for confirming/editing field values
 - SpecCollaborationAgent API and frontend panel for human-AI draft revision of
   SchemaSpec and ProgramSpec from the current task's page context
 - user-verified ProgramSpec storage and reuse for matching schema signatures
-- spec-first BDD suite wired to `specs/features/*.feature` for all eight feature centers
+- spec-first BDD suite wired to `specs/features/*.feature`, including RSI evaluation
 
 Thesis support artifacts are available under `docs/`: demo screenshot, live and offline benchmark tables, plus success/failure case analysis.

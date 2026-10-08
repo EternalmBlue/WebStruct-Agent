@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import get_args
 
 import pytest
-from app.contracts import ProgramSpec
+from app.contracts import FieldProgramSpec, ProgramSpec
 from app.contracts.types import ProgramStrategy
 from app.features.program_center.plan import (
     build_extraction_plan,
@@ -16,9 +16,12 @@ from app.features.program_center.repository import (
     list_user_verified_program_specs,
     persist_program_spec,
 )
+from pydantic import ValidationError
 from pytest_bdd import given, scenarios, then, when
 
-scenarios("program-center.feature")
+from tests.bdd.feature_paths import feature_path
+
+scenarios(feature_path("program-center.feature"))
 
 pytestmark = pytest.mark.db
 
@@ -129,3 +132,35 @@ def expect_summary_fields(context):
     )
     assert item["schema_name"] == context["schema_spec"].name
     assert item["program_count"] >= 1
+
+
+@given("一个缺少 selector 的 CSS 规则与一个携带 selector 的 LLM fallback 规则")
+def mismatched_program_rules(context):
+    context["mismatched_program_rules"] = [
+        {"field_name": "title", "strategy": "css"},
+        {"field_name": "description", "strategy": "llm_fallback", "selector": "h1"},
+    ]
+
+
+@when("我校验这些 ProgramSpec 规则")
+def validate_program_rules(context):
+    context["program_rule_errors"] = []
+    for payload in context["mismatched_program_rules"]:
+        try:
+            FieldProgramSpec.model_validate(payload)
+        except ValidationError as exc:
+            context["program_rule_errors"].extend(
+                str(error.get("msg", "")) for error in exc.errors()
+            )
+
+
+@then("ProgramSpec 校验会拒绝参数不匹配的规则")
+def reject_mismatched_program_rules(context):
+    assert len(context["program_rule_errors"]) == 2
+
+
+@then("错误信息指出具体字段与策略")
+def explain_mismatched_program_rules(context):
+    errors = " ".join(context["program_rule_errors"])
+    assert "title" in errors and "css" in errors
+    assert "description" in errors and "llm_fallback" in errors

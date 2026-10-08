@@ -12,8 +12,10 @@ import {
 import {
   loadSchemas,
   loadHealthStatus,
+  loadMonitoringConfiguration,
   loadVerifiedProgramSpecs,
   pollExtractionRun,
+  pollBenchmarkRun,
   reviseSpecWithAssistant,
   runBenchmarkRequest,
   runExtractionRequest,
@@ -21,6 +23,7 @@ import {
 } from "../api/webstructApi";
 import { AgentTracePanel } from "../features/extraction/AgentTracePanel";
 import { BenchmarkPanel } from "../features/evaluation/BenchmarkPanel";
+import { RSIIterationPanel } from "../features/evaluation/RSIIterationPanel";
 import { EvidencePanel } from "../features/verification/EvidencePanel";
 import { ExtractionResultsPanel } from "../features/extraction/ExtractionResultsPanel";
 import { FieldEditor } from "../features/schema/FieldEditor";
@@ -29,6 +32,7 @@ import { ProgramSpecPreviewPanel } from "../features/program/ProgramSpecPreviewP
 import { RunStateBadge } from "../features/extraction/RunStateBadge";
 import { VerificationReportPanel } from "../features/verification/VerificationReportPanel";
 import { WorkflowRail } from "../features/extraction/WorkflowRail";
+import { RunMetricsPanel } from "../features/extraction/RunMetricsPanel";
 import { sampleHtml } from "../lib/sampleHtml";
 import {
   appendEmptyField,
@@ -46,6 +50,7 @@ import type {
   HealthStatus,
   ReviewField,
   RunState,
+  RunSnapshot,
   SchemaSpec,
   SpecAssistantResponse,
   VerifiedProgramSpecSummary,
@@ -71,6 +76,7 @@ export function Dashboard() {
   const [runState, setRunState] = useState<RunState>("idle");
   const [benchmarkState, setBenchmarkState] = useState<RunState>("idle");
   const [extraction, setExtraction] = useState<ExtractionResponse | null>(null);
+  const [runSnapshot, setRunSnapshot] = useState<RunSnapshot | null>(null);
   const [benchmark, setBenchmark] = useState<BenchmarkResponse | null>(null);
   const [reviewFields, setReviewFields] = useState<ReviewField[]>([]);
   const [ruleName, setRuleName] = useState("");
@@ -104,6 +110,32 @@ export function Dashboard() {
       return verifiedProgramData[0]?.schema_signature ?? "";
     });
   }
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let healthInterval = 5000;
+    async function refreshHealth() {
+      try {
+        const data = await loadHealthStatus();
+        if (!cancelled) {
+          setHealth(data);
+          setConnectionState("online");
+        }
+      } catch {
+        if (!cancelled) setConnectionState("offline");
+      } finally {
+        if (!cancelled) timer = setTimeout(refreshHealth, healthInterval);
+      }
+    }
+    loadMonitoringConfiguration().then((config) => {
+      healthInterval = config.health_interval_ms;
+    }).catch(() => {}).finally(refreshHealth);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, []);
 
   useEffect(() => {
     if (workMode === "run") {
@@ -176,15 +208,42 @@ export function Dashboard() {
     if (!activeTask && legacyTaskId) {
       activeTask = { kind: "extraction", task_id: legacyTaskId };
     }
-    if (!activeTask?.task_id || activeTask.kind !== "extraction" || extraction || runState === "running") {
+    if (!activeTask?.task_id) {
+      return;
+    }
+    if (activeTask.kind === "benchmark") {
+      setBenchmarkState("running");
+      pollBenchmarkRun(activeTask.task_id)
+        .then((data) => {
+          setBenchmark(data);
+          setBenchmarkState(data.status === "failed" ? "failed" : "done");
+          window.localStorage.removeItem("webstruct.activeTask");
+        })
+        .catch((currentError) => {
+          setBenchmarkState("failed");
+          setError(currentError instanceof Error ? currentError.message : "评测状态查询失败");
+        });
       return;
     }
     setRunState("running");
     pollExtractionRun(activeTask.task_id, (snapshot) => {
+      setRunSnapshot(snapshot);
       setRunState(snapshot.status === "failed" ? "failed" : "running");
     })
       .then((data) => {
         setExtraction(data);
+        setRunSnapshot((current) => current ?? {
+          task_id: data.task_id,
+          correlation_id: data.correlation_id ?? "",
+          status: data.status as RunSnapshot["status"],
+          current_node: null,
+          completed_node_count: 0,
+          total_node_count: 0,
+          progress: 100,
+          updated_at: new Date().toISOString(),
+          event_cursor: 0,
+          errors: data.errors,
+        });
         setReviewFields(toReviewFields(data));
         setRuleName(defaultRuleName(data));
         setRunState(data.status === "failed" ? "failed" : "done");
@@ -192,6 +251,7 @@ export function Dashboard() {
         window.localStorage.removeItem("webstruct.activeTaskId");
       })
       .catch(() => {
+        setRunState("failed");
         setError("状态暂未更新，已保留上次任务数据。");
       });
   }, []);
@@ -300,6 +360,7 @@ export function Dashboard() {
     setRunState("running");
     setError("");
     setExtraction(null);
+    setRunSnapshot(null);
     setHtmlDrawerOpen(false);
     setSchemaDrawerOpen(false);
     try {
@@ -311,6 +372,7 @@ export function Dashboard() {
               htmlInput,
               schema: schemaDraft!,
             }, (snapshot) => {
+              setRunSnapshot(snapshot);
               window.localStorage.setItem("webstruct.activeTaskId", snapshot.task_id);
               setRunState(snapshot.status === "failed" ? "failed" : "running");
             })
@@ -321,10 +383,23 @@ export function Dashboard() {
               schema: createUsesManualSchema ? schemaDraft : null,
               programSpec: null,
             }, (snapshot) => {
+              setRunSnapshot(snapshot);
               window.localStorage.setItem("webstruct.activeTaskId", snapshot.task_id);
               setRunState(snapshot.status === "failed" ? "failed" : "running");
             });
       setExtraction(data);
+      setRunSnapshot((current) => current ?? {
+        task_id: data.task_id,
+        correlation_id: data.correlation_id ?? "",
+        status: data.status as RunSnapshot["status"],
+        current_node: null,
+        completed_node_count: 0,
+        total_node_count: 0,
+        progress: 100,
+        updated_at: new Date().toISOString(),
+        event_cursor: 0,
+        errors: data.errors,
+      });
       setReviewFields(toReviewFields(data));
       setRuleName(defaultRuleName(data));
       setMarkProgramVerified(false);
@@ -332,6 +407,8 @@ export function Dashboard() {
       setAssistantDraft(null);
       setAssistantError("");
       setRunState(data.errors.length ? "failed" : "done");
+      window.localStorage.removeItem("webstruct.activeTaskId");
+      window.localStorage.removeItem("webstruct.activeTask");
     } catch (currentError) {
       setRunState("failed");
       setError(currentError instanceof Error ? currentError.message : "抽取失败");
@@ -378,7 +455,7 @@ export function Dashboard() {
     if (workMode !== "create") {
       return;
     }
-    if (!extraction?.program_spec) {
+    if (!extraction?.program_spec || !extraction.schema_spec) {
       return;
     }
     setReviewState("running");
@@ -401,7 +478,7 @@ export function Dashboard() {
       setReviewState("done");
       setReviewMessage(
         data.program_verified
-          ? `已保存 ${data.field_count} 个复核字段，并将“${ruleName.trim() || extraction.schema_spec.name}”标记为可复用规则。`
+          ? `已保存 ${data.field_count} 个复核字段，并将“${ruleName.trim() || extraction.schema_spec?.name || "页面"}”标记为可复用规则。`
           : `已保存 ${data.field_count} 个复核字段。`
       );
     } catch (currentError) {
@@ -482,6 +559,9 @@ export function Dashboard() {
         htmlInput: preservedHtml,
         schema: assistantDraft.schema_spec,
         programSpec: assistantDraft.program_spec,
+      }, (snapshot) => {
+        setRunSnapshot(snapshot);
+        window.localStorage.setItem("webstruct.activeTaskId", snapshot.task_id);
       });
       setExtraction(data);
       setReviewFields(toReviewFields(data));
@@ -489,6 +569,7 @@ export function Dashboard() {
       setMarkProgramVerified(false);
       setReviewMessage("");
       setRunState(data.errors.length ? "failed" : "done");
+      window.localStorage.removeItem("webstruct.activeTaskId");
     } catch (currentError) {
       setRunState("failed");
       setError(currentError instanceof Error ? currentError.message : "重新抽取失败");
@@ -840,7 +921,9 @@ export function Dashboard() {
               <div>
                 <span>字段契约</span>
                 <strong>
-                  {extraction.schema_spec.name} · {extraction.schema_spec.fields.length} 个字段
+                  {extraction.schema_spec
+                    ? `${extraction.schema_spec.name} · ${extraction.schema_spec.fields.length} 个字段`
+                    : "未生成（采集未通过）"}
                 </strong>
                 <small>{schemaMode}</small>
               </div>
@@ -887,7 +970,7 @@ export function Dashboard() {
                 运行进度
                 <span>{runState === "running" ? "运行中" : "查看步骤"}</span>
               </summary>
-              <WorkflowRail extraction={extraction} runState={runState} />
+              <WorkflowRail extraction={extraction} runState={runState} snapshot={runSnapshot} />
             </details>
           ) : null}
 
@@ -959,6 +1042,7 @@ export function Dashboard() {
               <ProgramSpecPreviewPanel
                 programSpec={extraction?.program_spec}
                 schemaSpec={extraction?.schema_spec}
+                validationIssues={extraction?.program_validation_issues}
               />
             </section>
           ) : null}
@@ -976,6 +1060,8 @@ export function Dashboard() {
                   isRunning={runState === "running"}
                 />
                 <AgentTracePanel extraction={extraction} />
+                <RunMetricsPanel extraction={extraction} snapshot={runSnapshot} />
+                <RSIIterationPanel candidateRunId={extraction?.task_id} />
                 <details className="context-panel compact-details">
                   <summary>本次运行参数</summary>
                   <dl className="context-list">
@@ -999,7 +1085,7 @@ export function Dashboard() {
                       <>
                         <div>
                           <dt>字段契约</dt>
-                          <dd>{extraction.schema_spec.name}</dd>
+                        <dd>{extraction.schema_spec?.name ?? "未生成"}</dd>
                         </div>
                         <div>
                           <dt>任务</dt>
@@ -1048,6 +1134,15 @@ export function Dashboard() {
                       <dt>数据库</dt>
                       <dd>{health?.database_driver ?? "等待后端"}</dd>
                     </div>
+                    <div>
+                      <dt>CloakBrowser</dt>
+                      <dd>{health?.browser?.version ?? "未加载"} / {health?.browser?.binary_version ?? "未准备"}</dd>
+                    </div>
+                    <div>
+                      <dt>浏览器探针</dt>
+                      <dd>{health?.browser?.launch_verified ? "启动已验证" : "尚未验证启动"} · {health?.browser?.navigation_verified ? "导航已验证" : "尚未验证导航"}</dd>
+                    </div>
+                    {health?.browser?.reason ? <div><dt>浏览器状态</dt><dd>{health.browser.reason}</dd></div> : null}
                   </dl>
                 </details>
 
@@ -1161,5 +1256,5 @@ function defaultRuleName(extraction: Pick<ExtractionResponse, "schema_spec" | "v
   if (pageTitle) {
     return `${pageTitle.slice(0, 28)} 抽取规则`;
   }
-  return `${extraction.schema_spec.name} 抽取规则`;
+  return `${extraction.schema_spec?.name ?? "页面"} 抽取规则`;
 }

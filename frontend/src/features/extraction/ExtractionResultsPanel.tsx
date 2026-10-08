@@ -51,7 +51,7 @@ export function ExtractionResultsPanel({
             Schema v{extraction.schema_version.version}
           </span>
         ) : null}
-        {allowSpecCollaboration ? (
+        {allowSpecCollaboration && extraction?.schema_spec ? (
           <SpecAssistantPanel
             extraction={extraction}
             draft={assistantDraft}

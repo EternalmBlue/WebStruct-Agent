@@ -24,6 +24,12 @@ def test_cloakbrowser_auto_downloads_missing_pinned_binary(monkeypatch, tmp_path
     calls: list[dict[str, object]] = []
 
     class FakePage:
+        def wait_for_timeout(self, milliseconds):
+            assert milliseconds == settings.browser_post_navigation_wait_ms
+
+        def on(self, *_args):
+            pass
+
         def goto(self, _url, timeout=None):
             return SimpleNamespace(status=200)
 

@@ -8,9 +8,15 @@ from app.features.extraction_center.repair import repair_missing_required_fields
 from app.features.extraction_center.repository import persist_extraction_state
 from app.features.extraction_center.verifier import verify_extraction
 from app.features.page_center.collector import collect_page
+from app.features.page_center.single_page import assess_page_intent, select_body_content
 from app.features.page_center.views import normalize_page_view
+from app.features.program_center.compatibility import build_page_structure_signature
 from app.features.program_center.plan import build_extraction_plan, build_program_spec
-from app.features.program_center.repository import get_user_verified_program_spec
+from app.features.program_center.quality import (
+    add_body_fallback_programs,
+    validate_page_program,
+)
+from app.features.program_center.repository import resolve_user_verified_program_spec
 from app.features.schema_center.catalog import DEFAULT_SCHEMA_NAME
 from app.features.schema_center.repository import (
     persist_schema_version,
@@ -21,8 +27,8 @@ from app.platform.llm import (
     ModelProviderError,
     create_model_adapter,
 )
-from app.platform.tracing.node_runner import run_traced_node
 from app.platform.observability import runtime
+from app.platform.tracing.node_runner import run_traced_node
 
 
 def schema_agent_node(state: GraphRunState) -> dict[str, Any]:
@@ -125,9 +131,8 @@ def _schema_agent_body(state: GraphRunState) -> dict[str, Any]:
         try:
             schema_spec = adapter.generate_schema_spec(view_bundle=view_bundle)
             schema_generation_mode = "llm"
-            runtime.decision("model_call", purpose="schema_generation", result="success")
         except (MissingModelConfigurationError, ModelProviderError, ValueError) as exc:
-            runtime.decision("model_call", purpose="schema_generation", result="failed",
+            runtime.decision("model_decision", purpose="schema_generation", result="failed",
                              reason=str(exc))
             raise ValueError(f"Schema 无法生成: {exc}") from exc
 
@@ -152,23 +157,49 @@ def _page_collector_body(state: GraphRunState) -> dict[str, Any]:
         target_url=state.get("target_url", ""),
         schema_name=state.get("schema_name", DEFAULT_SCHEMA_NAME),
         input_html=state.get("input_html") or "",
+        requested_intent=state.get("target_page_intent", "single_resource"),
     )
-    metadata = observation.metadata or {}
-    runtime.decision(
-        "collection_result",
-        collector=metadata.get("collector", "unknown"),
-        fallback=any("fallback" in item for item in metadata.get("collection_attempts", [])),
+    assessment = assess_page_intent(
+        observation.html,
+        requested_intent=(
+            None
+            if state.get("target_page_intent") == "auto"
+            else state.get("target_page_intent", "single_resource")
+        ),
     )
+    if not assessment.gate_passed:
+        runtime.decision(
+            "page_intent_gate",
+            result="rejected",
+            intent=assessment.intent,
+            reasons=assessment.reasons,
+        )
+        raise ValueError(
+            f"page intent mismatch: requested={state.get('target_page_intent')}, "
+            f"actual={assessment.intent}"
+        )
+    body_selection = select_body_content(observation.html)
     return {
         "page_observation": observation,
         "target_url": observation.url,
+        "page_intent_assessment": assessment,
+        "body_selection": body_selection,
         "status": "page_collected",
     }
 
 
 def _view_normalizer_body(state: GraphRunState) -> dict[str, Any]:
     view_bundle = normalize_page_view(state["page_observation"])
-    return {"view_bundle": view_bundle, "status": "view_normalized"}
+    signature = build_page_structure_signature(
+        view_bundle,
+        intent=state.get("page_intent_assessment"),
+        body_selection=state.get("body_selection"),
+    )
+    return {
+        "view_bundle": view_bundle,
+        "page_structure_signature": signature,
+        "status": "view_normalized",
+    }
 
 
 def _planner_body(state: GraphRunState) -> dict[str, Any]:
@@ -200,14 +231,31 @@ def _programmer_body(state: GraphRunState) -> dict[str, Any]:
             "program_reused": False,
             "program_generation_mode": "provided",
             "program_generation_error": None,
+            "program_reuse_decision": "not_requested",
+            "program_reuse_reasons": [],
             "status": "program_provided",
         }
 
     must_run_verified = state.get("program_spec_mode") == "run_verified"
     allow_verified_reuse = must_run_verified or state.get("reuse_verified_program", False)
-    reused_program = get_user_verified_program_spec(schema_spec) if allow_verified_reuse else None
+    reused_program = None
+    reuse_decision = "not_requested"
+    reuse_reasons: list[str] = []
+    if allow_verified_reuse:
+        reused_program, compatibility = resolve_user_verified_program_spec(
+            schema_spec,
+            page_structure_signature=state.get("page_structure_signature"),
+        )
+        reuse_decision = "accepted" if reused_program is not None else compatibility.status
+        reuse_reasons = compatibility.reasons
+        runtime.decision(
+            "program_reuse",
+            result=reuse_decision,
+            reasons=reuse_reasons,
+        )
     if must_run_verified and reused_program is None:
-        raise ValueError("运行 ProgramSpec 需要先在人工复核中标记一个已验证 ProgramSpec")
+        reason = ", ".join(reuse_reasons) or "no_verified_program"
+        raise ValueError(f"运行 ProgramSpec 无兼容的已验证程序: {reason}")
     if reused_program:
         from app.features.schema_center.repository import schema_signature
 
@@ -221,6 +269,8 @@ def _programmer_body(state: GraphRunState) -> dict[str, Any]:
             "program_reused": True,
             "program_generation_mode": "reused",
             "program_generation_error": None,
+            "program_reuse_decision": "accepted",
+            "program_reuse_reasons": [],
             "status": "program_reused",
         }
 
@@ -239,19 +289,33 @@ def _programmer_body(state: GraphRunState) -> dict[str, Any]:
         )
         generation_mode = "llm"
         generation_error = None
-        runtime.decision("model_call", purpose="program_generation", result="success")
     except (MissingModelConfigurationError, ModelProviderError, ValueError) as exc:
         program_spec = fallback_program_spec
         generation_mode = "deterministic_fallback"
         generation_error = str(exc)
-        runtime.decision("model_call", purpose="program_generation", result="fallback",
+        runtime.decision("model_decision", purpose="program_generation", result="fallback",
                          reason=str(exc))
 
+    program_spec, diagnostics = validate_page_program(
+        program_spec,
+        view_bundle.raw_html,
+        body_selection=state.get("body_selection"),
+    )
+    program_spec = add_body_fallback_programs(
+        program_spec,
+        schema_spec=schema_spec,
+        body_selection=state.get("body_selection"),
+    )
+    for diagnostic in diagnostics:
+        runtime.decision("program_rule_rejected", **diagnostic)
     return {
         "program_spec": program_spec,
         "program_reused": False,
         "program_generation_mode": generation_mode,
         "program_generation_error": generation_error,
+        "program_validation_issues": diagnostics,
+        "program_reuse_decision": reuse_decision,
+        "program_reuse_reasons": reuse_reasons,
         "status": "program_ready",
     }
 

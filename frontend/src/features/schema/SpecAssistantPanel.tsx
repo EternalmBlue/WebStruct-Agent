@@ -31,10 +31,9 @@ export function SpecAssistantPanel({
   onApply: () => void;
   onRerun: () => void;
 }) {
-  if (!extraction) {
+  if (!extraction?.schema_spec) {
     return null;
   }
-
   return (
     <div className="spec-assistant">
       <button

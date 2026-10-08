@@ -8,9 +8,10 @@ from app.features.page_center.collector import collect_page
 from app.features.page_center.views import normalize_page_view
 from pytest_bdd import given, scenarios, then, when
 
+from tests.bdd.feature_paths import feature_path
 from tests.support.samples import NOTICE_HTML
 
-scenarios("page-center.feature")
+scenarios(feature_path("page-center.feature"))
 
 
 @given("一段包含标题与发布日期的高校通知 HTML")
@@ -78,6 +79,12 @@ def allow_browser_auto_download(context, monkeypatch, tmp_path):
     )
 
     class FakePage:
+        def wait_for_timeout(self, milliseconds):
+            assert milliseconds == settings.browser_post_navigation_wait_ms
+
+        def on(self, *_args):
+            pass
+
         def goto(self, _url, timeout=None):
             return SimpleNamespace(status=200)
 

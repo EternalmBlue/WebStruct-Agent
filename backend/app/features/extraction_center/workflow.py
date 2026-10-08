@@ -63,6 +63,7 @@ def initial_extraction_state(request: ExtractionRequest, task_id: str | None = N
         "schema_spec": request.schema_spec,
         "force_builtin_schema": request.force_builtin_schema,
         "target_url": request.target_url,
+        "target_page_intent": request.target_page_intent,
         "seed_urls": [request.target_url],
         "input_html": request.html or "",
         "persist_result": request.persist_result,

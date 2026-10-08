@@ -6,9 +6,11 @@ import pytest
 from app.contracts import BenchmarkDataset, BenchmarkItem, BenchmarkRequest
 from app.features.evaluation_center.workflow import build_benchmark_graph, run_benchmark_workflow
 from pytest_bdd import given, scenarios, then, when
+
+from tests.bdd.feature_paths import feature_path
 from tests.support.samples import SAMPLE_HTML, sample_schema
 
-scenarios("evaluation-center.feature")
+scenarios(feature_path("evaluation-center.feature"))
 
 pytestmark = pytest.mark.db
 

@@ -17,6 +17,13 @@ from app.contracts import (
 
 
 class ModelAdapter(Protocol):
+    def extract_record(
+        self,
+        *,
+        view_bundle: ViewBundle,
+    ) -> dict[str, object]:
+        """Return one generic structured record without receiving a target SchemaSpec."""
+
     def generate_schema_spec(
         self,
         *,

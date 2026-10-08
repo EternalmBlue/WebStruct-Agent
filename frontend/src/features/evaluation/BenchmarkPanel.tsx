@@ -39,6 +39,7 @@ export function BenchmarkPanel({
       {benchmarkState === "running" ? (
         <SkeletonRows count={5} />
       ) : benchmark?.benchmark_report ? (
+        <>
         <table className="data-table">
           <thead>
             <tr>
@@ -63,6 +64,28 @@ export function BenchmarkPanel({
             ))}
           </tbody>
         </table>
+        <details className="node-timing-details">
+          <summary>耗时、调用与指标来源</summary>
+          {benchmark.benchmark_report.methods.map((method) => (
+            <div className="benchmark-method-diagnostics" key={method.method}>
+              <strong>{method.method}</strong>
+              <dl className="context-list">
+                <div><dt>成功 / 失败 / 样本</dt><dd>{method.success_count ?? 0} / {method.failure_count ?? 0} / {method.sample_count ?? 0}</dd></div>
+                <div><dt>耗时 / 调用</dt><dd>{method.runtime_ms ?? "不可用"} ms / {method.model_call_count ?? 0}</dd></div>
+                <div><dt>Token 输入 / 输出</dt><dd>{method.actual_input_tokens ?? "不可用"} / {method.actual_output_tokens ?? "不可用"}</dd></div>
+                <div><dt>已知部分 Token / 缺用量调用</dt><dd>{method.partial_actual_input_tokens ?? 0} + {method.partial_actual_output_tokens ?? 0} / {method.token_usage_missing_calls ?? 0}</dd></div>
+                <div><dt>证据覆盖 / 修复正确率</dt><dd>{formatPercent(method.evidence_coverage)} / {formatPercent(method.repair_success_rate)}</dd></div>
+              </dl>
+              {Object.entries(method.metric_sources ?? {}).map(([name, source]) =>
+                <p key={name} className="panel-help">{name} · {source}{method.unavailable_reasons?.[name] ? ` · ${method.unavailable_reasons[name]}` : ""}</p>,
+              )}
+              {Object.entries(method.sample_errors ?? {}).map(([name, errors]) =>
+                <p className="inline-error" key={name}>{name}: {errors.join("; ")}</p>,
+              )}
+            </div>
+          ))}
+        </details>
+        </>
       ) : (
         <div className="empty-state benchmark-empty">
           <ChartBar size={24} weight="duotone" />

@@ -80,3 +80,12 @@ class RuntimeEventRecord(Base):
     task_id: Mapped[str] = mapped_column(String(64), index=True)
     sequence: Mapped[int] = mapped_column(Integer)
     payload_json: Mapped[str] = mapped_column(Text)
+
+
+class RSIIterationRecord(Base):
+    __tablename__ = "rsi_iterations"
+    iteration_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    experiment_id: Mapped[str] = mapped_column(String(128), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    payload_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

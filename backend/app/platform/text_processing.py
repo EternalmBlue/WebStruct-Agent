@@ -12,16 +12,25 @@ class _TextExtractor(HTMLParser):
         self.title_parts: list[str] = []
         self.heading_parts: list[str] = []
         self._current_tag: str | None = None
+        self._ignored: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() in {"script", "style", "noscript", "template"}:
+            self._ignored.append(tag.lower())
         self._current_tag = tag.lower()
 
     def handle_endtag(self, tag: str) -> None:
+        if self._ignored:
+            if tag.lower() == self._ignored[-1]:
+                self._ignored.pop()
+            return
         if tag.lower() in {"p", "div", "li", "tr", "h1", "h2", "h3", "br"}:
             self.parts.append("\n")
         self._current_tag = None
 
     def handle_data(self, data: str) -> None:
+        if self._ignored:
+            return
         text = normalize_whitespace(unescape(data))
         if not text:
             return

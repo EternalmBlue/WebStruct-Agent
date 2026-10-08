@@ -14,6 +14,7 @@ from app.features.program_center.plan import (
     build_program_spec,
     sanitize_candidate_field_programs,
 )
+from app.features.program_center.quality import validate_page_program
 from app.platform.config import settings
 from app.platform.llm import (
     MissingModelConfigurationError,
@@ -99,6 +100,11 @@ def revise_spec(request: SpecAssistantRequest) -> SpecAssistantResponse:
         fallback_program_spec=fallback_program_spec,
     )
     validation_issues = [*validation_issues, *safety_issues]
+    program_spec, page_issues = validate_page_program(program_spec, view_bundle.raw_html)
+    validation_issues.extend(
+        f"{issue['field']}: {issue['reason']} ({issue['selector']})"
+        for issue in page_issues
+    )
 
     return SpecAssistantResponse(
         task_id=request.task_id,

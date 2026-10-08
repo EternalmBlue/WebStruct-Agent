@@ -12,6 +12,14 @@ from app.contracts import (
 )
 from app.platform.text_processing import normalize_date, normalize_whitespace
 
+EVALUATOR_VERSION = "2"
+
+
+def is_missing(value: Any) -> bool:
+    return value is None or value == "" or value == [] or (
+        isinstance(value, str) and not value.strip()
+    )
+
 
 def verify_extraction(
     *,
@@ -24,6 +32,8 @@ def verify_extraction(
     for field in schema_spec.fields:
         result = extraction_result.get_field(field.name)
         if result is None:
+            if not field.required:
+                continue
             issues.append(
                 VerificationIssue(
                     field_name=field.name,
@@ -44,7 +54,18 @@ def verify_extraction(
                     message=result.error_message or "LLM fallback failed explicitly.",
                 )
             )
-        if field.required and not value:
+        elif result.error_message:
+            issues.append(
+                VerificationIssue(
+                    field_name=field.name,
+                    code="program_execution_failed",
+                    severity="error" if field.required and is_missing(value) else "warning",
+                    message=result.error_message,
+                )
+            )
+        if not field.required and is_missing(value):
+            continue
+        if field.required and is_missing(value):
             issues.append(
                 VerificationIssue(
                     field_name=field.name,
@@ -53,7 +74,7 @@ def verify_extraction(
                     message="必填字段缺失。",
                 )
             )
-        if value and not _matches_type(value, field.type):
+        if not is_missing(value) and not _matches_type(value, field.type):
             issues.append(
                 VerificationIssue(
                     field_name=field.name,
@@ -62,7 +83,7 @@ def verify_extraction(
                     message=f"字段值不符合 {field.type} 类型。",
                 )
             )
-        if field.type == "date" and value and normalize_date(str(value)) != str(value):
+        if field.type == "date" and not is_missing(value) and normalize_date(str(value)) != str(value):
             issues.append(
                 VerificationIssue(
                     field_name=field.name,
@@ -71,7 +92,7 @@ def verify_extraction(
                     message="日期没有归一化为 YYYY-MM-DD。",
                 )
             )
-        if value and not _evidence_supports_value(result):
+        if not is_missing(value) and not _evidence_supports_value(result):
             issues.append(
                 VerificationIssue(
                     field_name=field.name,
@@ -85,11 +106,11 @@ def verify_extraction(
                 VerificationIssue(
                     field_name=field.name,
                     code="empty_or_low_quality_evidence",
-                    severity="warning" if value else "error",
+                    severity="warning" if not is_missing(value) else "error",
                     message="证据为空或质量过低。",
                 )
             )
-        if value and result.confidence < _expected_confidence_floor(result):
+        if not is_missing(value) and result.confidence < _expected_confidence_floor(result):
             issues.append(
                 VerificationIssue(
                     field_name=field.name,
@@ -135,7 +156,8 @@ def _matches_type(value: Any, field_type: str) -> bool:
 
 
 def _evidence_supports_value(result: FieldExtractionResult) -> bool:
-    value = normalize_whitespace(str(_effective_value(result) or ""))
+    raw = _effective_value(result)
+    value = "" if is_missing(raw) else normalize_whitespace(str(raw))
     if not value:
         return False
     relaxed_value = value.replace("-", "")

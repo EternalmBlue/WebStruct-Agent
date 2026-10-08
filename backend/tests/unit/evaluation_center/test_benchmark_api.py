@@ -1,10 +1,11 @@
 
 import pytest
-from app.features.evaluation_center.workflow import build_benchmark_graph
 from app.contracts import BenchmarkDataset, BenchmarkItem
-from tests.support.samples import SAMPLE_HTML, sample_schema
+from app.features.evaluation_center.workflow import build_benchmark_graph
 from app.main import app
 from fastapi.testclient import TestClient
+
+from tests.support.samples import SAMPLE_HTML, sample_schema
 
 client = TestClient(app)
 

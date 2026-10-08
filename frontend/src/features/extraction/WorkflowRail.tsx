@@ -8,7 +8,7 @@ import {
   ShieldCheck,
 } from "@phosphor-icons/react";
 
-import type { ExtractionResponse, RunState } from "../../types/webstruct";
+import type { ExtractionResponse, RunSnapshot, RunState } from "../../types/webstruct";
 
 const WORKFLOW_STEPS = [
   { traceName: "page_collector_node", label: "页面采集", Icon: FileMagnifyingGlass },
@@ -25,9 +25,11 @@ const WORKFLOW_STEPS = [
 export function WorkflowRail({
   extraction,
   runState,
+  snapshot,
 }: {
   extraction: ExtractionResponse | null;
   runState: RunState;
+  snapshot?: RunSnapshot | null;
 }) {
   const completedTraceNames = new Set(
     extraction?.agent_traces
@@ -38,8 +40,9 @@ export function WorkflowRail({
   return (
     <section className="workflow-rail" aria-label="抽取节点流">
       {WORKFLOW_STEPS.map(({ traceName, label, Icon }, index) => {
-        const completed = completedTraceNames.has(traceName);
-        const pending = runState === "running" && !completed;
+        const nodeStatus = snapshot?.nodes?.[traceName]?.status;
+        const completed = nodeStatus === "success" || completedTraceNames.has(traceName);
+        const pending = nodeStatus === "running" || (!snapshot && runState === "running" && index === 0);
         return (
           <div
             className={`workflow-step${completed ? " workflow-step-complete" : ""}${
@@ -50,6 +53,8 @@ export function WorkflowRail({
             <span className="workflow-step-index">{index + 1}</span>
             <Icon size={18} weight={completed ? "fill" : "regular"} />
             <span>{label}</span>
+            {nodeStatus === "failed" ? <span className="field-status">失败</span> : null}
+            {nodeStatus === "skipped" ? <span className="field-status">跳过</span> : null}
             {completed ? <CheckCircle size={15} weight="fill" /> : null}
           </div>
         );

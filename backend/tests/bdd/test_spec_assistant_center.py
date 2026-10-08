@@ -17,9 +17,10 @@ from app.features.extraction_center.workflow import run_extraction_workflow
 from app.platform.llm.unconfigured import UnconfiguredModelAdapter
 from pytest_bdd import given, scenarios, then, when
 
+from tests.bdd.feature_paths import feature_path
 from tests.support.samples import NOTICE_HTML
 
-scenarios("spec-assistant-center.feature")
+scenarios(feature_path("spec-assistant-center.feature"))
 
 pytestmark = pytest.mark.db
 

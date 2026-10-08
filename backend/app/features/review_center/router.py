@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
 from app.contracts import ManualReviewRequest, ManualReviewResponse
+from app.features.extraction_center.repository import get_extraction_payload
 from app.features.program_center.repository import persist_program_spec
 from app.features.review_center.repository import persist_manual_review
 
@@ -17,11 +18,20 @@ def submit_manual_review(request: ManualReviewRequest) -> ManualReviewResponse:
 
     persist_manual_review(request.model_dump(mode="json"))
     if request.mark_program_verified and request.program_spec is not None:
+        extraction_payload = get_extraction_payload(request.task_id) or {}
+        signature_payload = extraction_payload.get("page_structure_signature")
+        from app.contracts import PageStructureSignature
+
         persist_program_spec(
             schema_spec=request.schema_spec,
             program_spec=request.program_spec,
             user_verified=True,
             rule_name=request.rule_name,
+            page_structure_signature=(
+                PageStructureSignature.model_validate(signature_payload)
+                if signature_payload
+                else None
+            ),
         )
 
     return ManualReviewResponse(

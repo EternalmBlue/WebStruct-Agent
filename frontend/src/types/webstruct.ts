@@ -7,7 +7,11 @@ export type HealthStatus = {
   database_driver: string;
   config_source?: string;
   config_loaded?: boolean;
-  browser?: { available: boolean; provider: string; version?: string; reason?: string | null };
+  browser?: {
+    available: boolean; provider: string; version?: string; binary_version?: string;
+    sdk_installed?: boolean; binary_ready?: boolean; launch_verified?: boolean;
+    navigation_verified?: boolean; last_probe_at?: string | null; reason?: string | null;
+  };
   observability?: { available: boolean; summary: string };
 };
 
@@ -22,8 +26,33 @@ export type RunSnapshot = {
   updated_at: string;
   event_cursor: number;
   runtime_ms?: number | null;
+  start_time?: string | null;
+  queue_wait_ms?: number | null;
+  observations?: RunEvent[];
   errors: string[];
   original_task_id?: string | null;
+  nodes?: Record<
+    string,
+    {
+      name: string;
+      role?: string;
+      status: string;
+      runtime_ms?: number | null;
+      output_summary?: string;
+      error_message?: string | null;
+    }
+  >;
+  metrics_version?: string;
+  metrics?: Record<string, MetricEnvelope>;
+  fingerprint?: Record<string, unknown>;
+};
+
+export type MetricEnvelope = {
+  value: number | null;
+  source: "measured" | "estimated" | "unavailable" | string;
+  unit?: string;
+  sample_count?: number;
+  reason?: string | null;
 };
 
 export type FieldType = "string" | "text" | "number" | "date" | "url" | "list";
@@ -82,6 +111,7 @@ export type ProgramSpecSummary = {
     strategy: string;
     enabled?: boolean;
     selector?: string | null;
+    attribute?: string | null;
     pattern?: string | null;
     label?: string | null;
     labels?: string[];
@@ -93,7 +123,7 @@ export type ExtractionResponse = {
   task_id: string;
   correlation_id?: string;
   status: string;
-  schema_spec: SchemaSpec;
+  schema_spec: SchemaSpec | null;
   schema_generation_mode?: string;
   schema_generation_error?: string | null;
   view_bundle?: ViewBundle | null;
@@ -107,6 +137,13 @@ export type ExtractionResponse = {
   program_reused?: boolean;
   program_generation_mode?: string;
   program_generation_error?: string | null;
+  program_validation_issues?: Array<{
+    field?: string;
+    strategy?: string;
+    selector?: string;
+    reason: string;
+    match_count?: number | null;
+  }>;
   extraction_result?: {
     schema_name: string;
     fields: FieldExtractionResult[];
@@ -131,6 +168,49 @@ export type ExtractionResponse = {
     error_message?: string | null;
   }>;
   errors: string[];
+  metrics_version?: string;
+  metrics?: Record<string, MetricEnvelope>;
+  fingerprint?: Record<string, unknown>;
+};
+
+export type RunMetricsResponse = {
+  task_id: string;
+  status: string;
+  config_version?: string;
+  metrics_version?: string;
+  metrics: Record<string, MetricEnvelope>;
+  fingerprint?: Record<string, unknown>;
+};
+
+export type RunEvent = {
+  sequence: number;
+  event_type: string;
+  timestamp: string;
+  [key: string]: unknown;
+};
+
+export type RSIIterationRequest = {
+  experiment_id: string;
+  baseline_run_id: string;
+  candidate_run_id: string;
+  hypothesis_id: string;
+  hypothesis: string;
+  intervention: string;
+  change_set_id: string;
+  parent_iteration_id?: string | null;
+};
+
+export type RSIIterationResponse = RSIIterationRequest & {
+  iteration_id: string;
+  status: "accepted" | "rejected" | "blocked" | "rolled_back";
+  metric_deltas: Record<string, number | null>;
+  baseline_metrics: Record<string, MetricEnvelope>;
+  candidate_metrics: Record<string, MetricEnvelope>;
+  thresholds: Record<string, number>;
+  decision_reason: string;
+  quality_basis: string;
+  evaluation_version?: string;
+  rollback_reason?: string | null;
 };
 
 export type ReviewField = {
@@ -159,6 +239,17 @@ export type BenchmarkResponse = {
       repair_success_rate?: number | null;
       estimated_token_cost?: number | null;
       runtime_ms?: number | null;
+      evidence_coverage?: number | null;
+      actual_input_tokens?: number | null;
+      actual_output_tokens?: number | null;
+      partial_actual_input_tokens?: number;
+      partial_actual_output_tokens?: number;
+      model_call_count?: number;
+      token_usage_missing_calls?: number;
+      failure_count?: number;
+      success_count?: number;
+      sample_count?: number;
+      sample_errors?: Record<string, string[]>;
       metric_sources?: Record<string, string>;
       unavailable_reasons?: Record<string, string>;
     }>;

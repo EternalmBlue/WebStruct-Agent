@@ -1,3 +1,5 @@
+import time
+
 from app.contracts import (
     EvidenceBundle,
     ExtractionResult,
@@ -9,7 +11,7 @@ from app.contracts import (
 from app.features.extraction_center.fallback import decide_fallback_fields
 from app.features.extraction_center.verifier import verify_extraction
 from app.platform.llm import MissingModelConfigurationError, ModelAdapter, ModelProviderError
-from app.platform.observability import runtime
+from app.platform.observability.telemetry import observe
 from app.platform.text_processing import normalize_date
 
 
@@ -33,20 +35,22 @@ def repair_missing_required_fields(
         return {"repair_attempts": repair_attempts, "status": "repair_skipped"}
 
     fields = []
+    outcomes = []
     for result in extraction_result.fields:
         if result.field_name not in fallback_by_field:
             fields.append(result)
             continue
         field_spec = next(field for field in schema_spec.fields if field.name == result.field_name)
+        started = time.perf_counter()
+        outcome = {"field": result.field_name, "before": result.normalized_value
+                   if result.normalized_value is not None else result.value,
+                   "reason": fallback_by_field[result.field_name].reason}
         try:
             value, evidence = model_adapter.extract_field(field_spec, view_bundle)
         except (MissingModelConfigurationError, ModelProviderError) as exc:
-            runtime.decision(
-                "field_repair",
-                field=result.field_name,
-                result="failed",
-                reason=str(exc),
-            )
+            outcome.update(result="failed", error_message=str(exc), after=outcome["before"])
+            outcome["runtime_ms"] = int((time.perf_counter() - started) * 1000)
+            outcomes.append(outcome)
             fields.append(
                 result.model_copy(
                     update={
@@ -57,8 +61,8 @@ def repair_missing_required_fields(
             )
             continue
         if value and evidence:
-            runtime.decision("field_repair", field=result.field_name, result="repaired")
             normalized = normalize_date(value) if field_spec.type == "date" else value
+            outcome.update(result="repaired", after=normalized)
             fields.append(
                 FieldExtractionResult(
                     field_name=result.field_name,
@@ -71,7 +75,7 @@ def repair_missing_required_fields(
                 )
             )
         else:
-            runtime.decision("field_repair", field=result.field_name, result="abstained")
+            outcome.update(result="abstained", after=outcome["before"])
             fields.append(
                 result.model_copy(
                     update={
@@ -80,18 +84,30 @@ def repair_missing_required_fields(
                     }
                 )
             )
+        outcome["runtime_ms"] = int((time.perf_counter() - started) * 1000)
+        outcomes.append(outcome)
 
-    repaired_result = extraction_result.model_copy(update={"fields": fields})
+    repaired_result = extraction_result.model_copy(update={
+        "fields": fields,
+        "overall_confidence": round(sum(field.confidence for field in fields) / len(fields), 4)
+        if fields else 0.0,
+    })
     repaired_report = verify_extraction(
         task_id=task_id,
         schema_spec=schema_spec,
         extraction_result=repaired_result,
     )
+    issue_fields = {issue.field_name for issue in repaired_report.issues}
+    for outcome in outcomes:
+        outcome["verified"] = outcome["result"] == "repaired" and outcome["field"] not in issue_fields
+        observe("field_repair", **{key: value for key, value in outcome.items()
+                                 if key not in {"before", "after"}})
     evidences = [evidence for field in repaired_result.fields for evidence in field.evidence]
     return {
         "extraction_result": repaired_result,
         "evidence_bundle": EvidenceBundle(task_id=task_id, evidences=evidences),
         "verification_report": repaired_report,
         "repair_attempts": repair_attempts + 1,
+        "repair_outcomes": outcomes,
         "status": "repaired",
     }

@@ -3,9 +3,9 @@
 import time
 
 import pytest
-
 from app.contracts import ExtractionRequest, FieldSpec, SchemaSpec
 from app.platform.observability import runtime
+
 from tests.support.samples import NOTICE_HTML
 
 

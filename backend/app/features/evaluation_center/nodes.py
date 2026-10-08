@@ -8,20 +8,21 @@ from app.contracts import (
     BenchmarkReport,
     ExtractionRequest,
     ExtractionResult,
-    FieldSpec,
+    FieldEvidence,
     FieldExtractionResult,
     GraphRunState,
 )
 from app.features.evaluation_center.metrics import score_method
 from app.features.evaluation_center.repository import persist_benchmark_state
 from app.features.extraction_center.executor import execute_program_spec
-from app.features.extraction_center.verifier import verify_extraction
 from app.features.extraction_center.workflow import run_extraction_workflow
 from app.features.page_center.collector import collect_page
 from app.features.page_center.views import normalize_page_view
 from app.features.program_center.plan import build_extraction_plan, build_program_spec
 from app.platform.config import settings
 from app.platform.llm import create_model_adapter
+from app.platform.observability.metrics import signature, token_metrics
+from app.platform.observability.telemetry import capture_observations
 from app.platform.tracing.node_runner import run_traced_node
 
 BENCHMARK_METHODS = [
@@ -112,6 +113,28 @@ def _metric_body(state: GraphRunState) -> dict[str, Any]:
         dataset_name=state["benchmark_dataset"].name,
         methods=method_results,
         summary="显式 Schema、固定页面与标注输入的 benchmark 已完成；各指标均保留实际来源与不可用原因。",
+        experiment_settings={
+            "model": settings.llm_model,
+            "program_initialization": "shared_deterministic_cold_start",
+            "program_signatures": {
+                item.item_id: signature(
+                    build_program_spec(build_extraction_plan(item.schema_spec)).model_dump(
+                        mode="json"
+                    )
+                )
+                for item in state["benchmark_dataset"].items
+                if item.schema_spec
+            },
+            "methods": {
+                method: {
+                    "schema_input": method != "Direct LLM",
+                    "verifier": method == "Ours Full",
+                    "repair": method == "Ours Full",
+                    "reuse_verified_program": False,
+                }
+                for method in [*BENCHMARK_METHODS, "Ours Full"]
+            },
+        },
     )
     return {"benchmark_report": report, "status": "metrics_done"}
 
@@ -124,43 +147,73 @@ def _report_body(state: GraphRunState) -> dict[str, Any]:
 def _run_method(method: str, item: BenchmarkItem) -> dict[str, Any]:
     errors: list[str] = []
     status = "completed"
-    confidence = 0.0
+    confidence = None
     predicted: dict[str, Any] = {}
     evidenced_fields = 0
-    repaired_fields = 0
     field_count = 0
     program_reused = False
+    extraction_result = None
+    repair_outcomes = []
+    shared_program = (
+        build_program_spec(build_extraction_plan(item.schema_spec)) if item.schema_spec else None
+    )
+    observations: list[dict[str, Any]] = []
     start_time = time.perf_counter()
-    try:
-        if method == "Ours Full":
-            result_state = run_extraction_workflow(
-                ExtractionRequest(
-                    target_url=item.url,
-                    html=item.html,
-                    schema_name=item.schema_spec.name if item.schema_spec else "",
-                    schema_spec=item.schema_spec,
-                    persist_result=False,
+    with capture_observations() as captured:
+        try:
+            if method == "Ours Full":
+                result_state = run_extraction_workflow(
+                    ExtractionRequest(
+                        target_url=item.url,
+                        html=item.html,
+                        schema_name=item.schema_spec.name if item.schema_spec else "",
+                        schema_spec=item.schema_spec,
+                        program_spec=shared_program,
+                        enable_field_repair=True,
+                        reuse_verified_program=False,
+                        persist_result=False,
+                    )
                 )
-            )
-            errors = result_state.get("errors", [])
-            status = result_state.get("status", "failed")
-            extraction_result = result_state.get("extraction_result")
-            program_reused = bool(result_state.get("program_reused", False))
-        else:
-            extraction_result = _run_baseline_extraction(method, item)
-        if extraction_result:
-            predicted = _predicted_record(extraction_result.fields)
-            confidence = extraction_result.overall_confidence
-            field_count = len(extraction_result.fields)
-            evidenced_fields = sum(1 for field in extraction_result.fields if field.evidence)
-            repaired_fields = sum(
-                1 for field in extraction_result.fields if field.status == "repaired"
-            )
-    except Exception as exc:  # benchmark should report failed methods, not abort all metrics
-        status = "failed"
-        errors = [f"{method}: {exc}"]
+                errors = result_state.get("errors", [])
+                status = result_state.get("status", "failed")
+                extraction_result = result_state.get("extraction_result")
+                program_reused = bool(result_state.get("program_reused", False))
+                repair_outcomes = result_state.get("repair_outcomes", [])
+            else:
+                extraction_result = _run_baseline_extraction(method, item)
+            if extraction_result:
+                predicted = _predicted_record(extraction_result.fields)
+                confidence = extraction_result.overall_confidence
+                field_count = len(extraction_result.fields)
+                evidenced_fields = sum(
+                    bool(field.evidence)
+                    for field in extraction_result.fields
+                    if (field.normalized_value if field.normalized_value is not None else field.value)
+                    not in (None, "", [])
+                )
+        except Exception as exc:  # benchmark should report failed methods, not abort all metrics
+            status = "failed"
+            errors = [f"{method}: {exc}"]
+        observations = list(captured)
     runtime_ms = int((time.perf_counter() - start_time) * 1000)
-    token_cost = _estimate_token_cost(item, method, predicted)
+    field_confidences = (
+        {field.field_name: field.confidence for field in extraction_result.fields}
+        if extraction_result
+        else {}
+    )
+    token_usage = token_metrics(observations)
+    model_call_count = token_usage["model_call_count"]
+    token_cost = token_usage["estimated_input_tokens"] + token_usage["estimated_output_tokens"]
+    repair_eligible = [
+        outcome
+        for outcome in repair_outcomes
+        if outcome["field"] in item.gold_record
+    ]
+    repair_success_fields = sum(
+        outcome["before"] != item.gold_record[outcome["field"]]
+        and outcome.get("after") == item.gold_record[outcome["field"]]
+        for outcome in repair_eligible
+    )
     return {
         "item_id": item.item_id,
         "predicted": predicted,
@@ -171,14 +224,30 @@ def _run_method(method: str, item: BenchmarkItem) -> dict[str, Any]:
         "method": method,
         "runtime_ms": runtime_ms,
         "token_cost": token_cost,
-            "program_reused": program_reused,
+        "program_reused": program_reused,
+        "initial_program_signature": signature(shared_program.model_dump(mode="json"))
+        if shared_program
+        else None,
         "evidenced_fields": evidenced_fields,
         "field_count": field_count,
-        "repair_success": method == "Ours Full" and repaired_fields > 0,
+        "nonempty_field_count": sum(value not in (None, "", []) for value in predicted.values()),
+        "repair_success": repair_success_fields > 0,
+        "repair_attempt_fields": len(repair_eligible),
+        "repair_success_fields": repair_success_fields,
+        "repair_outcomes": repair_outcomes,
+        "field_confidences": field_confidences,
+        "model_call_count": model_call_count,
+        "actual_input_tokens": token_usage["actual_input_tokens"],
+        "actual_output_tokens": token_usage["actual_output_tokens"],
+        "partial_actual_input_tokens": token_usage["partial_actual_input_tokens"],
+        "partial_actual_output_tokens": token_usage["partial_actual_output_tokens"],
+        "token_usage_missing_calls": token_usage["token_usage_missing_calls"],
+        "estimated_input_tokens": token_usage["estimated_input_tokens"],
+        "estimated_output_tokens": token_usage["estimated_output_tokens"],
         "schema_spec": item.schema_spec.model_dump(mode="json") if item.schema_spec else None,
-        "required_fields": [
-            field.name for field in item.schema_spec.fields if field.required
-        ] if item.schema_spec else [],
+        "required_fields": [field.name for field in item.schema_spec.fields if field.required]
+        if item.schema_spec
+        else [],
         "evidence_annotations": None,
     }
 
@@ -233,48 +302,46 @@ def _run_baseline_extraction(method: str, item: BenchmarkItem):
         model_adapter=adapter,
         allow_llm_fallback=method in {"Direct LLM", "LLM + Schema", "Hybrid without Verifier"},
     )
-    if method == "Hybrid without Verifier":
-        return extraction_result
-    report = verify_extraction(
-        task_id=f"benchmark-{item.item_id}-{method}",
-        schema_spec=schema_spec,
-        extraction_result=extraction_result,
-    )
-    _ = report
     return extraction_result
 
 
-DIRECT_LLM_FIELDS = (
-    FieldSpec(name="title", description="页面标题", type="text", required=True),
-    FieldSpec(name="organization", description="页面中的组织或发布单位", type="text"),
-    FieldSpec(name="position", description="页面中的岗位或事项名称", type="text"),
-    FieldSpec(name="publish_date", description="页面明确标注的发布日期", type="date"),
-    FieldSpec(name="deadline", description="页面明确标注的截止日期", type="date"),
-)
-
-
 def _run_direct_llm(*, task_id: str, view_bundle, adapter) -> ExtractionResult:
+    response = adapter.extract_record(view_bundle=view_bundle)
+    record = response.get("record", {})
+    raw_evidence = response.get("evidence", {})
     fields: list[FieldExtractionResult] = []
-    for field in DIRECT_LLM_FIELDS:
-        value, evidence = adapter.extract_field(field, view_bundle)
+    for field_name, value in record.items():
+        evidence_data = raw_evidence.get(field_name, {}) if isinstance(raw_evidence, dict) else {}
+        evidence_text = evidence_data.get("text") if isinstance(evidence_data, dict) else None
+        score = evidence_data.get("confidence", 0.0) if isinstance(evidence_data, dict) else 0.0
+        try:
+            score = max(0.0, min(1.0, float(score)))
+        except (TypeError, ValueError):
+            score = 0.0
+        evidence = FieldEvidence(
+            field_name=str(field_name),
+            source="llm_fallback",
+            text=str(evidence_text or ""),
+            score=score,
+        )
         fields.append(
             FieldExtractionResult(
-                field_name=field.name,
+                field_name=str(field_name),
                 value=value,
                 normalized_value=value,
-                confidence=evidence.score if evidence else 0.0,
-                evidence=[evidence] if evidence else [],
+                confidence=score,
+                evidence=[evidence] if evidence_text else [],
                 strategy="llm_fallback",
                 status="extracted" if value not in (None, "") else "missing",
             )
         )
     return ExtractionResult(
         task_id=task_id,
-        schema_name="direct_llm_fixed_mapping",
+        schema_name="direct_llm_generic_record",
         fields=fields,
-        overall_confidence=round(
-            sum(field.confidence for field in fields) / len(fields), 4
-        ),
+        overall_confidence=round(sum(field.confidence for field in fields) / len(fields), 4)
+        if fields
+        else 0.0,
     )
 
 
@@ -297,9 +364,7 @@ def _run_llm_with_schema(*, task_id: str, schema_spec, view_bundle, adapter) -> 
         task_id=task_id,
         schema_name=schema_spec.name,
         fields=fields,
-        overall_confidence=round(
-            sum(field.confidence for field in fields) / len(fields), 4
-        ),
+        overall_confidence=round(sum(field.confidence for field in fields) / len(fields), 4),
     )
 
 
@@ -310,16 +375,3 @@ def _predicted_record(fields: list[FieldExtractionResult]) -> dict[str, Any]:
         else field.value
         for field in fields
     }
-
-
-def _estimate_token_cost(item: BenchmarkItem, method: str, predicted: dict[str, Any]) -> int:
-    base = int(len(item.html) / settings.estimated_chars_per_token)
-    if method in {"Direct LLM", "LLM + Schema"}:
-        base = int(base * 1.15)
-    elif method == "Program Only":
-        base = int(base * 0.35)
-    elif method == "Hybrid without Verifier":
-        base = int(base * 0.7)
-    elif method == "Ours Full":
-        base = int(base * 0.85)
-    return max(base + len(predicted) * 12, 0)

@@ -12,9 +12,10 @@ from app.features.program_center.repository import (
 )
 from pytest_bdd import given, scenarios, then, when
 
+from tests.bdd.feature_paths import feature_path
 from tests.support.samples import NOTICE_HTML
 
-scenarios("review-center.feature")
+scenarios(feature_path("review-center.feature"))
 
 pytestmark = pytest.mark.db
 

@@ -10,9 +10,10 @@ from app.features.extraction_center.workflow import (
 )
 from pytest_bdd import given, scenarios, then, when
 
+from tests.bdd.feature_paths import feature_path
 from tests.support.samples import NOTICE_HTML
 
-scenarios("extraction-center.feature")
+scenarios(feature_path("extraction-center.feature"))
 
 pytestmark = pytest.mark.db
 

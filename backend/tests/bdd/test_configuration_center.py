@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pytest
 from app.platform.configuration import load_settings
 
 
@@ -39,3 +40,34 @@ def test_invalid_or_missing_config_has_actionable_error(tmp_path):
         assert "42" not in str(exc)
     else:  # pragma: no cover
         raise AssertionError("invalid config must fail")
+
+
+def test_browser_challenge_wait_uses_toml_not_environment(tmp_path, monkeypatch):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        "[browser]\nchallenge_wait_ms = 9000\nchallenge_poll_ms = 100\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("BROWSER_CHALLENGE_WAIT_MS", "0")
+    settings = load_settings(path)
+    assert settings.browser_challenge_wait_ms == 9000
+    assert settings.browser_challenge_poll_ms == 100
+
+
+def test_browser_post_navigation_wait_uses_toml(tmp_path, monkeypatch):
+    path = tmp_path / "config.toml"
+    path.write_text("[browser]\npost_navigation_wait_ms = 10000\n", encoding="utf-8")
+    monkeypatch.setenv("BROWSER_POST_NAVIGATION_WAIT_MS", "0")
+    loaded = load_settings(path)
+    assert loaded.browser_post_navigation_wait_ms == 10000
+
+
+@pytest.mark.parametrize("item, value", [
+    ("challenge_wait_ms", -1), ("challenge_wait_ms", 60001),
+    ("challenge_poll_ms", 0), ("challenge_poll_ms", 5001),
+])
+def test_browser_wait_limits_reject_unbounded_config(item, value, tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(f"[browser]\n{item} = {value}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=f"browser.{item}"):
+        load_settings(path)

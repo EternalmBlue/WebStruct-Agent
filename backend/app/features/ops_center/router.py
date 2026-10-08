@@ -61,6 +61,15 @@ def run_events(task_id: str, after_cursor: int = Query(default=0, ge=0)):
     return runtime.events(task_id, after_cursor)
 
 
+@router.get("/runs/{task_id}/metrics")
+def run_metrics(task_id: str):
+    snapshot = runtime.snapshot(task_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    return {key: snapshot.get(key, {}) for key in
+            ("task_id", "status", "config_version", "metrics_version", "metrics", "fingerprint")}
+
+
 @router.get("/observability/summary")
 def observability_summary(hours: int = 24):
     return runtime.summary(hours=max(1, min(hours, 24 * 30)))

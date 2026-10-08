@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from html.parser import HTMLParser
 from typing import Any
 
 from app.contracts import (
@@ -13,55 +12,10 @@ from app.contracts import (
     SchemaSpec,
     ViewBundle,
 )
+from app.platform.dom import parse_html, select_values
 from app.platform.llm import MissingModelConfigurationError, ModelAdapter
+from app.platform.observability.telemetry import observe
 from app.platform.text_processing import bounded_snippet, normalize_date, normalize_whitespace
-
-
-class _SimpleSelectorParser(HTMLParser):
-    def __init__(self, selector: str) -> None:
-        super().__init__()
-        self.selector = selector
-        self.matches: list[str] = []
-        self._capture_depth = 0
-        self._buffer: list[str] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        attrs_dict = dict(attrs)
-        if self._matches(tag.lower(), attrs_dict):
-            self._capture_depth = 1
-            self._buffer = []
-        elif self._capture_depth:
-            self._capture_depth += 1
-
-    def handle_endtag(self, tag: str) -> None:
-        if not self._capture_depth:
-            return
-        self._capture_depth -= 1
-        if self._capture_depth == 0:
-            value = normalize_whitespace(" ".join(self._buffer))
-            if value:
-                self.matches.append(value)
-
-    def handle_data(self, data: str) -> None:
-        if self._capture_depth:
-            self._buffer.append(data)
-
-    def _matches(self, tag: str, attrs: dict[str, str | None]) -> bool:
-        selector = self.selector.strip()
-        if not selector:
-            return False
-        if selector.startswith("#"):
-            return attrs.get("id") == selector[1:]
-        if selector.startswith("."):
-            classes = (attrs.get("class") or "").split()
-            return selector[1:] in classes
-        if "." in selector:
-            tag_name, class_name = selector.split(".", maxsplit=1)
-            return tag == tag_name and class_name in (attrs.get("class") or "").split()
-        if "#" in selector:
-            tag_name, element_id = selector.split("#", maxsplit=1)
-            return tag == tag_name and attrs.get("id") == element_id
-        return tag == selector.lower()
 
 
 def execute_program_spec(
@@ -113,12 +67,19 @@ def _execute_field_programs(
     *,
     allow_llm_fallback: bool,
 ) -> FieldExtractionResult:
+    errors = []
     for program in field_programs:
         if not program.enabled:
             continue
         if program.strategy == "llm_fallback" and not allow_llm_fallback:
             continue
-        value, evidence = _execute_single_program(field, program, view_bundle, adapter)
+        try:
+            value, evidence = _execute_single_program(field, program, view_bundle, adapter)
+        except (ValueError, MissingModelConfigurationError) as exc:
+            if isinstance(exc, ValueError) and "unsupported ProgramSpec strategy" in str(exc):
+                raise
+            errors.append(str(exc))
+            continue
         if value not in (None, ""):
             normalized = _apply_postprocess(value, program.postprocess)
             confidence = _confidence_for(program, evidence, normalized)
@@ -140,6 +101,7 @@ def _execute_field_programs(
         evidence=[],
         strategy="none",
         status="missing",
+        error_message="; ".join(errors) if errors else None,
     )
 
 
@@ -250,20 +212,7 @@ def _extract_css(
 ) -> tuple[str | None, FieldEvidence | None]:
     if not program.selector:
         return None, None
-    parser = _SimpleSelectorParser(program.selector)
-    parser.feed(view_bundle.raw_html)
-    if not parser.matches:
-        return None, None
-    value = parser.matches[0]
-    start = max(view_bundle.text.find(value), 0)
-    return value, FieldEvidence(
-        field_name=field_name,
-        source="css",
-        text=value,
-        start_char=start,
-        end_char=start + len(value),
-        score=0.8,
-    )
+    return _extract_dom(field_name, program, view_bundle)
 
 
 def _extract_xpath(
@@ -271,16 +220,32 @@ def _extract_xpath(
     program: FieldProgramSpec,
     view_bundle: ViewBundle,
 ) -> tuple[str | None, FieldEvidence | None]:
-    if not program.selector or not program.selector.startswith("//"):
+    if not program.selector:
         return None, None
-    tag = program.selector.removeprefix("//").split("[", maxsplit=1)[0].strip()
-    if not tag:
+    return _extract_dom(field_name, program, view_bundle)
+
+
+def _extract_dom(field_name, program, view_bundle):
+    try:
+        values = select_values(parse_html(view_bundle.raw_html), program.strategy,
+                               program.selector, program.attribute)
+    except Exception as exc:
+        observe("selector_execution", field=field_name, strategy=program.strategy,
+                selector=program.selector, result="invalid_selector", match_count=None)
+        raise ValueError(f"invalid {program.strategy} selector: {program.selector}") from exc
+    outcome = ("no_matches" if not values else "ambiguous_matches" if len(values) > 1
+               else "empty_value" if not values[0] else "success")
+    observe("selector_execution", field=field_name, strategy=program.strategy,
+            selector=program.selector, result=outcome, match_count=len(values))
+    if outcome == "ambiguous_matches":
+        raise ValueError(f"ambiguous {program.strategy} selector: {program.selector}")
+    if outcome != "success":
         return None, None
-    return _extract_css(
-        field_name,
-        FieldProgramSpec(field_name=field_name, strategy="css", selector=tag),
-        view_bundle,
-    )
+    value = values[0]
+    start = view_bundle.text.find(value)
+    return value, FieldEvidence(field_name=field_name, source=program.strategy, text=value,
+                               start_char=start if start >= 0 else None,
+                               end_char=start + len(value) if start >= 0 else None, score=.8)
 
 
 def _apply_postprocess(value: str, postprocess: list[str]) -> str:

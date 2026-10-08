@@ -29,3 +29,9 @@
     并且 一个合法的用户自定义 Schema
     当 ProgramSpec 中心为该 Schema 生成抽取程序
     那么 生成的 ProgramSpec 仍然覆盖全部必填字段
+
+  场景: ProgramSpec 规则必须与策略参数匹配
+    假如 一个缺少 selector 的 CSS 规则与一个携带 selector 的 LLM fallback 规则
+    当 我校验这些 ProgramSpec 规则
+    那么 ProgramSpec 校验会拒绝参数不匹配的规则
+    并且 错误信息指出具体字段与策略

@@ -19,6 +19,9 @@ class UnconfiguredModelAdapter:
 
     reason: str = "LLM fallback requires model.api_key in config.toml"
 
+    def extract_record(self, *, view_bundle: ViewBundle) -> dict[str, object]:
+        raise MissingModelConfigurationError(self.reason)
+
     def generate_schema_spec(
         self,
         *,

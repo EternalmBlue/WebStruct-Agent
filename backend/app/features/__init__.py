@@ -96,6 +96,13 @@ FEATURE_CENTERS: tuple[FeatureCenter, ...] = (
         router_loader=_load("spec_assistant_center", "router"),
         note="用自然语言修订 Schema 与 ProgramSpec",
     ),
+    FeatureCenter(
+        key="rsi_center",
+        title="RSI 迭代观测中心",
+        spec_file="rsi-observability.feature",
+        router_loader=_load("rsi_center", "router"),
+        note="基线/候选可比性评估与人工回滚留存",
+    ),
 )
 
 

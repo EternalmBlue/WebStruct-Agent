@@ -1,10 +1,10 @@
 """Single TOML configuration boundary. No environment or dotenv overrides."""
-from functools import lru_cache
-from hashlib import sha256
 import json
-from pathlib import Path
 import re
 import tomllib
+from functools import lru_cache
+from hashlib import sha256
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.engine import make_url
@@ -24,13 +24,16 @@ class Settings(BaseModel):
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     browser_provider: str = "cloakbrowser"
     browser_sdk_version: str = "0.5.12"
-    browser_binary_version: str = "147.0.7727.31"
+    browser_binary_version: str = "146.0.7680.177.5"
     browser_executable_path: str = ""
     browser_cache_path: str = ".browser-cache"
     browser_license_key: str = Field(default="", repr=False)
     browser_auto_download: bool = True
     allow_http_fallback: bool = True
     navigation_timeout_ms: int = Field(default=15000, gt=0)
+    browser_post_navigation_wait_ms: int = Field(default=10000, ge=0, le=60000)
+    browser_challenge_wait_ms: int = Field(default=15000, ge=0, le=60000)
+    browser_challenge_poll_ms: int = Field(default=250, ge=50, le=5000)
     http_timeout_seconds: float = Field(default=8, gt=0)
     poll_interval_ms: int = Field(default=1000, ge=100)
     health_interval_ms: int = Field(default=5000, ge=100)
@@ -39,6 +42,8 @@ class Settings(BaseModel):
     retain_business_payload: bool = True
     confidence_threshold: float = Field(default=.8, ge=0, le=1)
     estimated_chars_per_token: float = Field(default=4, gt=0)
+    rsi_min_quality_delta: float = Field(default=.01, gt=0, le=1)
+    rsi_max_latency_regression_ratio: float = Field(default=.2, ge=0, le=10)
     frontend_host: str = "127.0.0.1"
     frontend_port: int = Field(default=5173, ge=1, le=65535)
     frontend_api_target: str = "http://127.0.0.1:8000"
@@ -93,10 +98,16 @@ SECTIONS = {
                 "cache_path": "browser_cache_path", "license_key": "browser_license_key",
                 "auto_download": "browser_auto_download",
                 "allow_http_fallback": "allow_http_fallback",
-                "navigation_timeout_ms": "navigation_timeout_ms", "http_timeout_seconds": "http_timeout_seconds"},
+                "navigation_timeout_ms": "navigation_timeout_ms",
+                "post_navigation_wait_ms": "browser_post_navigation_wait_ms",
+                "challenge_wait_ms": "browser_challenge_wait_ms",
+                "challenge_poll_ms": "browser_challenge_poll_ms",
+                "http_timeout_seconds": "http_timeout_seconds"},
     "monitoring": {k: k for k in ("poll_interval_ms", "health_interval_ms", "max_workers",
                                   "event_page_size", "retain_business_payload")},
     "benchmark": {k: k for k in ("confidence_threshold", "estimated_chars_per_token")},
+    "rsi": {"min_quality_delta": "rsi_min_quality_delta",
+            "max_latency_regression_ratio": "rsi_max_latency_regression_ratio"},
     "frontend": {"host": "frontend_host", "port": "frontend_port", "api_target": "frontend_api_target"},
 }
 

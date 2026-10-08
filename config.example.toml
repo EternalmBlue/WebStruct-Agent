@@ -17,13 +17,16 @@ timeout_seconds = 30
 [browser]
 provider = "cloakbrowser"
 sdk_version = "0.5.12"
-binary_version = "147.0.7727.31"
+binary_version = "146.0.7680.177.5"
 executable_path = ""
 cache_path = ".browser-cache"
 license_key = ""
 auto_download = true
 allow_http_fallback = true
 navigation_timeout_ms = 15000
+post_navigation_wait_ms = 10000
+challenge_wait_ms = 15000
+challenge_poll_ms = 250
 http_timeout_seconds = 8
 
 [monitoring]
@@ -36,6 +39,10 @@ retain_business_payload = true
 [benchmark]
 confidence_threshold = 0.8
 estimated_chars_per_token = 4
+
+[rsi]
+min_quality_delta = 0.01
+max_latency_regression_ratio = 0.2
 
 [frontend]
 host = "127.0.0.1"

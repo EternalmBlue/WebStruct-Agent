@@ -15,8 +15,31 @@
 | 评测中心 evaluation | `POST /api/benchmark/run`（202 回执）、`GET /api/benchmark/reports/{task_id}`（结果） | `app/features/evaluation_center/` | [evaluation-center.feature](./features/evaluation-center.feature) | `tests/bdd/test_evaluation_center.py` |
 | 人工复核中心 review | `POST /api/reviews/manual` | `app/features/review_center/` | [review-center.feature](./features/review-center.feature) | `tests/bdd/test_review_center.py` |
 | 对话式规格助手 spec-assistant | `POST /api/spec-assistant/revise` | `app/features/spec_assistant_center/` | [spec-assistant-center.feature](./features/spec-assistant-center.feature) | `tests/bdd/test_spec_assistant_center.py` |
+| 监督迭代中心 rsi | `POST /api/rsi/iterations`、`GET /api/rsi/iterations/{iteration_id}`、`POST /api/rsi/iterations/{iteration_id}/rollback` | `app/features/rsi_center/` | [rsi-observability.feature](./features/rsi-observability.feature) | `tests/bdd/test_rsi_observability.py` |
+| 泛化单页抽取契约 | 由抽取中心编排，阶段 2 增加结构兼容与正文质量服务 | `app/features/page_center/`、`app/features/program_center/`、`app/features/extraction_center/` | [generalized-extraction.feature](./features/generalized-extraction.feature) | 阶段 1 spec contract：`tests/bdd/test_generalized_extraction_spec.py`；阶段 2 行为绑定：`tests/bdd/test_generalized_extraction.py` |
 
 ## 平台能力规范
+
+固定资源验证增量：[resource-validation.md](./resource-validation.md) 与
+[resource-validation.feature](./features/resource-validation.feature)，验收绑定
+`tests/bdd/test_resource_validation.py`。仍使用单页抽取与 RSI 中心，不新增爬虫。
+共享 DOM 解析与选择器执行归属 `app/platform/dom.py`；10 URL 实验入口为
+`tests/support/resource_validation_smoke.py`；结构调查记录见
+[`minebbs-resource-structure.md`](./minebbs-resource-structure.md)。
+
+RSI 增量（2026-10-08）：采集结构化观测、运行指标与监督迭代评估遵循
+[rsi-protocol.md](./rsi-protocol.md) 和 [rsi-observability.feature](./features/rsi-observability.feature)。
+实现归属 `app/platform/observability/`（指标）、`app/platform/browser/`（启动观测）、
+`app/features/page_center/`（内容分类）与 `app/features/rsi_center/`（评估/留存）；
+验收绑定 `tests/bdd/test_rsi_observability.py`。
+接口为 `GET /api/runs/{task_id}/metrics`、`POST /api/rsi/iterations`、
+`GET /api/rsi/iterations/{iteration_id}`、`POST /api/rsi/iterations/{iteration_id}/rollback`。
+
+泛化单页抽取（阶段 1）：页面意图、正文候选完整性、结构指纹兼容性和复用
+观测遵循 [generalized-single-page-extraction.md](./generalized-single-page-extraction.md)
+及 [generalized-extraction.feature](./features/generalized-extraction.feature)。
+该规范明确禁止把论坛主页、分类页误当成单资源页，也禁止仅按 Schema 名称或
+hostname 盲目复用 ProgramSpec。
 
 | 能力 | 对外接口或入口 | 实现位置 | 规范文件 | 行为测试 |
 | --- | --- | --- | --- | --- |
@@ -28,6 +51,7 @@
 | 能力 | 作用 | 实现位置 | 规范文件 | 行为测试 |
 | --- | --- | --- | --- | --- |
 | 响应式工作台 | 响应式布局、动态状态刷新、极简交互 | `frontend/src/features/`、`frontend/src/pages/` | [ui-workbench.feature](./features/ui-workbench.feature) | `frontend/src/pages/Dashboard.tsx` 与 `frontend/src/styles.css` |
+| 运行诊断与监督迭代 | 浏览器探针、增量事件、指标来源、比较与回滚 | `frontend/src/features/extraction/RunMetricsPanel.tsx`、`frontend/src/features/evaluation/RSIIterationPanel.tsx` | [rsi-observability.feature](./features/rsi-observability.feature) | `backend/tests/support/rsi_browser_smoke.py`（显式运行） |
 
 ## 平台层（platform，被功能中心共享）
 

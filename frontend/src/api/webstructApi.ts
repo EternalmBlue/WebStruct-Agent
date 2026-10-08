@@ -11,6 +11,10 @@ import type {
   SpecAssistantResponse,
   VerifiedProgramSpecSummary,
   RunSnapshot,
+  RunMetricsResponse,
+  RunEvent,
+  RSIIterationRequest,
+  RSIIterationResponse,
 } from "../types/webstruct";
 
 type CreateExtractionRequest = {
@@ -42,12 +46,62 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
+export async function loadMonitoringConfiguration() {
+  const response = await fetch("/api/config");
+  if (!response.ok) throw new Error(`configuration HTTP ${response.status}`);
+  return readJsonResponse<{ poll_interval_ms: number; health_interval_ms: number }>(response);
+}
+
 export async function loadHealthStatus(): Promise<HealthStatus> {
   const response = await fetch("/api/health");
   if (!response.ok) {
     throw new Error(`health HTTP ${response.status}`);
   }
   return readJsonResponse<HealthStatus>(response);
+}
+
+export async function loadRunMetrics(taskId: string): Promise<RunMetricsResponse> {
+  const response = await fetch(`/api/runs/${taskId}/metrics`);
+  if (!response.ok) {
+    throw new Error(`run metrics HTTP ${response.status}`);
+  }
+  return readJsonResponse<RunMetricsResponse>(response);
+}
+
+export async function loadRunEvents(taskId: string, cursor = 0) {
+  const response = await fetch(`/api/runs/${encodeURIComponent(taskId)}/events?after_cursor=${cursor}`);
+  if (!response.ok) throw new Error(`run events HTTP ${response.status}`);
+  return readJsonResponse<{ events: RunEvent[]; next_cursor: number }>(response);
+}
+
+async function loadRunSnapshot(taskId: string): Promise<RunSnapshot> {
+  const response = await fetch(`/api/runs/${encodeURIComponent(taskId)}`);
+  if (!response.ok) throw new Error(`run HTTP ${response.status}`);
+  return readJsonResponse<RunSnapshot>(response);
+}
+
+async function readRSIResponse(response: Response) {
+  const data = await readJsonResponse<RSIIterationResponse & { detail?: string }>(response);
+  if (!response.ok) throw new Error(data.detail || `RSI HTTP ${response.status}`);
+  return data;
+}
+
+export async function evaluateRSIIteration(request: RSIIterationRequest) {
+  return readRSIResponse(await fetch("/api/rsi/iterations", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  }));
+}
+
+export async function loadRSIIteration(iterationId: string) {
+  return readRSIResponse(await fetch(`/api/rsi/iterations/${encodeURIComponent(iterationId)}`));
+}
+
+export async function rollbackRSIIteration(iterationId: string, reason: string) {
+  return readRSIResponse(await fetch(`/api/rsi/iterations/${encodeURIComponent(iterationId)}/rollback`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+  }));
 }
 
 export async function loadSchemas(): Promise<SchemaSpec[]> {
@@ -129,16 +183,27 @@ export async function pollExtractionRun(
   taskId: string,
   onProgress?: (snapshot: RunSnapshot) => void,
 ): Promise<ExtractionResponse> {
+  const configuration = await loadMonitoringConfiguration();
+  let cursor = 0;
+  const observations: RunEvent[] = [];
   for (;;) {
-    const statusResponse = await fetch(`/api/runs/${taskId}`);
-    const snapshot = await readJsonResponse<RunSnapshot>(statusResponse);
+    const snapshot = await loadRunSnapshot(taskId);
+    while (cursor < snapshot.event_cursor) {
+      const page = await loadRunEvents(taskId, cursor);
+      if (page.next_cursor <= cursor) break;
+      observations.push(...page.events.filter((event) =>
+        ["browser_probe", "collection_attempt", "model_call", "field_repair"].includes(event.event_type)));
+      cursor = page.next_cursor;
+    }
+    snapshot.observations = observations.slice();
     onProgress?.(snapshot);
     const response = await fetch(`/api/extract/${taskId}`);
+    if (!response.ok) throw new Error(`extract HTTP ${response.status}`);
     const data = await readJsonResponse<ExtractionResponse | RunSnapshot>(response);
-    if ("schema_spec" in data && data.status !== "queued" && data.status !== "running") {
+    if ("agent_traces" in data && data.status !== "queued" && data.status !== "running") {
       return data;
     }
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, configuration.poll_interval_ms));
   }
 }
 
@@ -194,16 +259,17 @@ export async function pollBenchmarkRun(
   taskId: string,
   onProgress?: (snapshot: RunSnapshot) => void,
 ): Promise<BenchmarkResponse> {
+  const configuration = await loadMonitoringConfiguration();
   for (;;) {
-    const statusResponse = await fetch(`/api/runs/${taskId}`);
-    const snapshot = await readJsonResponse<RunSnapshot>(statusResponse);
+    const snapshot = await loadRunSnapshot(taskId);
     onProgress?.(snapshot);
     const response = await fetch(`/api/benchmark/reports/${taskId}`);
+    if (!response.ok) throw new Error(`benchmark HTTP ${response.status}`);
     const data = await readJsonResponse<BenchmarkResponse | RunSnapshot>(response);
     if ("benchmark_report" in data && data.status !== "queued" && data.status !== "running") {
       return data;
     }
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, configuration.poll_interval_ms));
   }
 }
 

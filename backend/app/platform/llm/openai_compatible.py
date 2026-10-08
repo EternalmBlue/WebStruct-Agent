@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -22,6 +23,8 @@ from app.features.program_center.plan import (
     merge_program_specs,
     sanitize_candidate_field_programs,
 )
+from app.platform.configuration import settings
+from app.platform.dom import page_context
 from app.platform.llm.protocol import (
     MAX_LLM_TEXT_CHARS,
     MAX_PROGRAMMER_HTML_CHARS,
@@ -36,6 +39,7 @@ from app.platform.llm.response_parsing import (
     _safe_text_list,
     _sanitize_schema_spec,
 )
+from app.platform.observability.telemetry import model_context, model_operation, observe
 from app.platform.text_processing import bounded_snippet, normalize_date, normalize_whitespace
 
 
@@ -48,13 +52,33 @@ class OpenAICompatibleModelAdapter:
     model: str = "deepseek-chat"
     timeout_seconds: float = 30.0
 
+    def extract_record(self, *, view_bundle: ViewBundle) -> dict[str, object]:
+        """Direct-LLM baseline: one generic record call, with no target schema."""
+        payload = self._build_record_payload(view_bundle=view_bundle)
+        with model_operation("record_extraction"):
+            response_data = self._post_chat_completion(payload)
+        parsed = _parse_json_content(response_data)
+        record = parsed.get("record", parsed)
+        if not isinstance(record, dict):
+            raise ModelProviderError("direct LLM record was not a JSON object")
+        evidence = parsed.get("evidence", {})
+        return {
+            "record": {
+                str(key): value
+                for key, value in record.items()
+                if isinstance(key, str) and key and key != "evidence"
+            },
+            "evidence": evidence if isinstance(evidence, dict) else {},
+        }
+
     def generate_schema_spec(
         self,
         *,
         view_bundle: ViewBundle,
     ) -> SchemaSpec:
         payload = self._build_schema_spec_payload(view_bundle=view_bundle)
-        response_data = self._post_chat_completion(payload)
+        with model_operation("schema_generation"):
+            response_data = self._post_chat_completion(payload)
         parsed = _parse_json_content(response_data)
         return _sanitize_schema_spec(parsed, view_bundle=view_bundle)
 
@@ -71,7 +95,8 @@ class OpenAICompatibleModelAdapter:
             extraction_plan=extraction_plan,
             view_bundle=view_bundle,
         )
-        response_data = self._post_chat_completion(payload)
+        with model_operation("program_generation"):
+            response_data = self._post_chat_completion(payload)
         parsed = _parse_json_content(response_data)
         return build_safe_program_spec_from_candidate(
             parsed,
@@ -85,7 +110,8 @@ class OpenAICompatibleModelAdapter:
         view_bundle: ViewBundle,
     ) -> tuple[str | None, FieldEvidence | None]:
         payload = self._build_payload(field, view_bundle)
-        response_data = self._post_chat_completion(payload)
+        with model_operation("field_extraction", field.name):
+            response_data = self._post_chat_completion(payload)
         parsed = _parse_json_content(response_data)
         if parsed.get("abstain") is True:
             return None, None
@@ -140,7 +166,8 @@ class OpenAICompatibleModelAdapter:
             current_program_spec=current_program_spec,
             view_bundle=view_bundle,
         )
-        response_data = self._post_chat_completion(payload)
+        with model_operation("spec_revision"):
+            response_data = self._post_chat_completion(payload)
         parsed = _parse_json_content(response_data)
         revised_schema = _sanitize_schema_spec(
             parsed.get("schema_spec", {}), view_bundle=view_bundle
@@ -214,6 +241,40 @@ class OpenAICompatibleModelAdapter:
             "stream": False,
         }
 
+    def _build_record_payload(self, *, view_bundle: ViewBundle) -> dict[str, object]:
+        page_payload = {
+            "url": view_bundle.url,
+            "title": view_bundle.title,
+            "headings": view_bundle.headings[:20],
+            "metadata": view_bundle.metadata,
+            "lines": view_bundle.lines[:160],
+            "text_excerpt": view_bundle.text[:MAX_LLM_TEXT_CHARS],
+        }
+        system_prompt = (
+            "You are a generic web information extraction baseline. Return one JSON object "
+            "for the current page without receiving or inferring a target SchemaSpec. "
+            "Extract only salient facts explicitly supported by the page. Use stable snake_case "
+            "keys, scalar or list values, and do not invent facts. Include an evidence object "
+            "mapping each key to exact supporting text and confidence when possible."
+        )
+        user_prompt = (
+            "Extract a generic structured record from this page. Do not use a predefined field "
+            "list and do not mention a schema. Return JSON with keys record and evidence. "
+            "record must be an object. evidence must map field names to objects with text and "
+            "confidence.\n\n"
+            f"Current page view JSON:\n{json.dumps(page_payload, ensure_ascii=False)}"
+        )
+        return {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0,
+            "stream": False,
+        }
+
     def _build_schema_spec_payload(self, *, view_bundle: ViewBundle) -> dict[str, object]:
         page_payload = {
             "url": view_bundle.url,
@@ -268,7 +329,7 @@ class OpenAICompatibleModelAdapter:
             "metadata": view_bundle.metadata,
             "lines": view_bundle.lines[:120],
             "text_excerpt": view_bundle.text[:MAX_PROGRAMMER_TEXT_CHARS],
-            "html_excerpt": view_bundle.raw_html[:MAX_PROGRAMMER_HTML_CHARS],
+            **page_context(view_bundle.raw_html, limit=MAX_PROGRAMMER_HTML_CHARS),
         }
         system_prompt = (
             "You are ProgrammerAgent in a schema-first web information extraction "
@@ -279,6 +340,13 @@ class OpenAICompatibleModelAdapter:
             "Prefer page-specific selectors, labels, or regex rules that can be "
             "executed locally against the provided HTML/text. Add llm_fallback only "
             "as a final fallback for a field when local evidence may be insufficient."
+            " Use selector_candidates and content HTML, not site navigation. "
+            "DOM selectors must match exactly one nonempty field-specific node. "
+            "Never use html/body/head/title or //title for a resource/article title. "
+            "Separate title from version and badges; do not include related resources. "
+            "CSS supports combinators/attributes/pseudo-classes; XPath is a real XPath evaluator. "
+            "Use optional attribute for element attributes (e.g. datetime, href); "
+            "XPath may also select /text() or /@datetime. Do not invent selectors."
         )
         user_prompt = (
             "Create ProgramSpec for this page.\n\n"
@@ -287,7 +355,7 @@ class OpenAICompatibleModelAdapter:
             f"Current page view JSON:\n{json.dumps(page_payload, ensure_ascii=False)}\n\n"
             "Return one JSON object with exactly this top-level key: field_programs. "
             "field_programs must be an array. Each item must contain: field_name, "
-            "strategy, enabled, selector, pattern, label, labels, postprocess. "
+            "strategy, enabled, selector, attribute, pattern, label, labels, postprocess. "
             "Use null when selector, pattern, or label is not applicable. "
             "Keep regex patterns valid for Python re. Do not include markdown."
         )
@@ -322,7 +390,7 @@ class OpenAICompatibleModelAdapter:
             "metadata": view_bundle.metadata,
             "lines": view_bundle.lines[:160],
             "text_excerpt": view_bundle.text[:MAX_SCHEMA_TEXT_CHARS],
-            "html_excerpt": view_bundle.raw_html[:MAX_PROGRAMMER_HTML_CHARS],
+            **page_context(view_bundle.raw_html, limit=MAX_PROGRAMMER_HTML_CHARS),
         }
         system_prompt = (
             "You are SpecCollaborationAgent for a schema-first web information "
@@ -332,6 +400,9 @@ class OpenAICompatibleModelAdapter:
             "Do not invent page facts. Do not create arbitrary code. ProgramSpec "
             "must use only strategies css, xpath, regex_on_text, text_near_label, "
             "llm_fallback and postprocess strip, normalize_whitespace, normalize_date. "
+            "DOM rules must match exactly one nonempty field-specific node. "
+            "Do not select html, body, head, document title, navigation or related resources. "
+            "Separate article title, version and badges; use XPath /text() when appropriate. "
             "Return JSON only."
         )
         user_prompt = (
@@ -348,7 +419,7 @@ class OpenAICompatibleModelAdapter:
             "schema_spec must contain name, description, domain, fields. "
             "Each field must contain name, description, type, required, aliases, examples. "
             "program_spec must contain field_programs. Each program must contain field_name, "
-            "strategy, enabled, selector, pattern, label, labels, postprocess. "
+            "strategy, enabled, selector, attribute, pattern, label, labels, postprocess. "
             "Keep field names stable snake_case English identifiers. Use Chinese descriptions. "
             "Put uncertainty or missing evidence in validation_issues instead of inventing values."
         )
@@ -369,24 +440,40 @@ class OpenAICompatibleModelAdapter:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
+        started = time.perf_counter()
+        details = {"http_attempted": True, **model_context.get(), "provider": "openai-compatible",
+                   "model": self.model, "actual_input_tokens": None, "actual_output_tokens": None,
+                   "estimated_input_tokens": max(1, int(sum(len(str(m.get("content", "")))
+                       for m in payload.get("messages", [])) / settings.estimated_chars_per_token)),
+                   "estimated_output_tokens": None, "token_usage_source": "unavailable",
+                   "estimate_source": "estimated", "estimated_chars_per_token": settings.estimated_chars_per_token}
         try:
-            response = httpx.post(
-                endpoint,
-                headers=headers,
-                json=payload,
-                timeout=self.timeout_seconds,
-            )
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            raise ModelProviderError(
-                f"LLM provider returned HTTP {exc.response.status_code}"
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise ModelProviderError(
-                f"LLM provider request failed: {exc.__class__.__name__}"
-            ) from exc
-
-        data = response.json()
-        if not isinstance(data, dict):
-            raise ModelProviderError("LLM provider response was not a JSON object")
-        return data
+            try:
+                response = httpx.post(endpoint, headers=headers, json=payload,
+                                      timeout=self.timeout_seconds)
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                raise ModelProviderError(f"LLM provider returned HTTP {exc.response.status_code}") from exc
+            except httpx.HTTPError as exc:
+                raise ModelProviderError(f"LLM provider request failed: {exc.__class__.__name__}") from exc
+            data = response.json()
+            if not isinstance(data, dict):
+                raise ModelProviderError("LLM provider response was not a JSON object")
+            usage = data.get("usage")
+            usage = usage if isinstance(usage, dict) else {}
+            for metric_name, provider_name in [("actual_input_tokens", "prompt_tokens"),
+                                               ("actual_output_tokens", "completion_tokens")]:
+                value = usage.get(provider_name)
+                details[metric_name] = value if type(value) is int and value >= 0 else None
+            details.update(result="success",
+                           estimated_output_tokens=int(len(json.dumps(data.get("choices", []),
+                               ensure_ascii=False)) / settings.estimated_chars_per_token))
+            if details["actual_input_tokens"] is not None and details["actual_output_tokens"] is not None:
+                details["token_usage_source"] = "measured"
+            return data
+        except Exception as exc:
+            details.update(result="failed", error_code=exc.__class__.__name__,
+                           error_message=f"model request failed: {exc.__class__.__name__}")
+            raise
+        finally:
+            observe("model_call", runtime_ms=round((time.perf_counter() - started) * 1000, 3), **details)

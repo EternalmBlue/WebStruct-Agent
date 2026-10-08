@@ -5,7 +5,9 @@ from collections.abc import Callable
 from typing import Any
 
 from app.contracts import AgentRunTrace, GraphRunState
+from app.platform.configuration import settings
 from app.platform.observability import active_task, runtime
+from app.platform.observability.telemetry import safe_url
 
 NodeBody = Callable[[GraphRunState], dict[str, Any]]
 
@@ -26,7 +28,7 @@ def run_traced_node(
             name,
             role,
             "running",
-            input_summary=input_summary if input_summary is not None else summarize_state(state),
+            input_summary=settings.redact(input_summary) if input_summary is not None else summarize_state(state),
         )
     try:
         update = body(state)
@@ -51,7 +53,7 @@ def run_traced_node(
             )
         return {**update, "agent_traces": [trace]}
     except Exception as exc:
-        message = f"{name}: {exc}"
+        message = settings.redact(f"{name}: {exc}")
         trace = AgentRunTrace(
             name=name,
             role=role,
@@ -59,7 +61,7 @@ def run_traced_node(
             runtime_ms=_elapsed_ms(started_at),
             input_summary=input_summary if input_summary is not None else summarize_state(state),
             output_summary="",
-            error_message=str(exc),
+            error_message=settings.redact(str(exc)),
         )
         if task_id:
             runtime.node(
@@ -79,10 +81,10 @@ def summarize_state(state: GraphRunState) -> str:
     if "schema_name" in state:
         parts.append(f"schema={state['schema_name']}")
     if "target_url" in state:
-        parts.append(f"url={state['target_url']}")
+        parts.append(f"url={safe_url(state['target_url'])}")
     if "status" in state:
         parts.append(f"status={state['status']}")
-    return ", ".join(parts)
+    return settings.redact(", ".join(parts))
 
 
 def _elapsed_ms(started_at: float) -> int:

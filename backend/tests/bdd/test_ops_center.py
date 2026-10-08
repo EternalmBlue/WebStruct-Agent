@@ -5,7 +5,9 @@ from __future__ import annotations
 import pytest
 from pytest_bdd import given, scenarios, then, when
 
-scenarios("ops-center.feature")
+from tests.bdd.feature_paths import feature_path
+
+scenarios(feature_path("ops-center.feature"))
 
 pytestmark = pytest.mark.db
 

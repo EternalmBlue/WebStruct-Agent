@@ -1,9 +1,9 @@
 """Persisted local task runtime with domain workflow injection."""
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from threading import RLock
-import time
 from uuid import uuid4
 
 from app.platform.configuration import settings
@@ -15,7 +15,7 @@ active_task: ContextVar[str | None] = ContextVar("active_task", default=None)
 
 
 def now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class TaskRuntime:
@@ -84,6 +84,7 @@ class TaskRuntime:
             "start_time": None,
             "end_time": None,
             "runtime_ms": None,
+            "queue_wait_ms": None,
             "event_cursor": 0,
             "errors": [],
             "config_version": settings.config_version,
@@ -172,7 +173,10 @@ class TaskRuntime:
             snapshot = load_payload(record.payload_json)
             if snapshot["status"] != "queued":
                 return
-            snapshot.update(status="running", start_time=now())
+            started_at = now()
+            snapshot.update(status="running", start_time=started_at,
+                            queue_wait_ms=max(0, (datetime.fromisoformat(started_at) -
+                                datetime.fromisoformat(snapshot["created_at"])).total_seconds() * 1000))
             self._event(session, record, snapshot, "task_started", status="running")
 
     def node(
@@ -219,7 +223,7 @@ class TaskRuntime:
             )
             snapshot["progress"] = round(
                 100 * snapshot["completed_node_count"] / snapshot["total_node_count"], 1
-            )
+            ) if snapshot["total_node_count"] else 100
             self._event(
                 session,
                 record,
@@ -239,10 +243,8 @@ class TaskRuntime:
             snapshot = load_payload(record.payload_json)
             if snapshot["status"] in {"failed", "completed"}:
                 return
-            safe = {
-                key: settings.redact(value) if isinstance(value, str) else value
-                for key, value in details.items()
-            }
+            from app.platform.observability.telemetry import redact_tree
+            safe = redact_tree(details)
             self._event(session, record, snapshot, event_type, **safe)
 
     def finish(self, task_id: str, state: dict, elapsed_ms: int) -> None:
@@ -250,6 +252,16 @@ class TaskRuntime:
         snapshot = self.snapshot(task_id)
         if not snapshot:
             return
+        from app.platform.observability.metrics import build_run_metrics, metric
+        with session_scope() as session:
+            observations = [load_payload(row.payload_json) for row in session.query(RuntimeEventRecord)
+                            .filter(RuntimeEventRecord.task_id == task_id).order_by(RuntimeEventRecord.sequence)]
+        try:
+            measurements = build_run_metrics(state, elapsed_ms, observations)
+        except Exception as exc:
+            measurements = {"metrics_version": "2", "metrics": {},
+                            "fingerprint": {}, "metrics_error": settings.redact(str(exc))}
+        measurements["metrics"]["queue_wait_ms"] = metric(snapshot.get("queue_wait_ms"), unit="ms")
         for name, node in snapshot["nodes"].items():
             if node["status"] in {"pending", "running"}:
                 self.node(
@@ -272,6 +284,7 @@ class TaskRuntime:
                 end_time=now(),
                 runtime_ms=elapsed_ms,
                 errors=[settings.redact(error) for error in state.get("errors", [])],
+                **measurements,
             )
             result = jsonable_state(
                 {
@@ -282,6 +295,7 @@ class TaskRuntime:
                 }
             )
             result["errors"] = snapshot["errors"]
+            result.update(measurements)
             if not settings.retain_business_payload:
                 for key in ("input_html", "page_observation", "view_bundle", "benchmark_dataset"):
                     result.pop(key, None)
@@ -328,7 +342,7 @@ class TaskRuntime:
             )
 
     def summary(self, hours: int = 24) -> dict:
-        since = datetime.now(timezone.utc) - timedelta(hours=hours)
+        since = datetime.now(UTC) - timedelta(hours=hours)
         with session_scope() as session:
             snapshots = [
                 load_payload(record.payload_json)
@@ -337,27 +351,11 @@ class TaskRuntime:
         snapshots = [
             snapshot
             for snapshot in snapshots
-            if not snapshot["parent_task_id"]
+            if not snapshot.get("parent_task_id")
             and datetime.fromisoformat(snapshot["created_at"]) >= since
         ]
-        counts = {
-            state: sum(snapshot["status"] == state for snapshot in snapshots)
-            for state in ("queued", "running", "completed", "failed")
-        }
-        times = [
-            snapshot["runtime_ms"]
-            for snapshot in snapshots
-            if snapshot["runtime_ms"] is not None
-        ]
-        return {
-            "total": len(snapshots),
-            **counts,
-            "average_runtime_ms": sum(times) / len(times) if times else None,
-            "by_workflow": {
-                kind: sum(snapshot["workflow_type"] == kind for snapshot in snapshots)
-                for kind in {snapshot["workflow_type"] for snapshot in snapshots}
-            },
-        }
+        from app.platform.observability.metrics import summarize_runs
+        return summarize_runs(snapshots)
 
 
 runtime = TaskRuntime()

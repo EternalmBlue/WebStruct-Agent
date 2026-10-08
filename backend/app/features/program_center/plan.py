@@ -134,13 +134,6 @@ def _title_programs(field_name: str) -> list[FieldProgramSpec]:
             selector="h1",
             postprocess=["strip", "normalize_whitespace"],
         ),
-        FieldProgramSpec(
-            field_name=field_name,
-            strategy="xpath",
-            enabled=True,
-            selector="//title",
-            postprocess=["strip", "normalize_whitespace"],
-        ),
     ]
 
 
@@ -224,7 +217,7 @@ def _sanitize_field_program(
     labels = _sanitize_labels(payload.get("labels"))
 
     if strategy == "css":
-        if not selector or any(token in selector for token in ["<", ">", "{", "}"]):
+        if not selector or any(token in selector for token in ["<", "{", "}"]):
             return None
         normalized_payload["selector"] = selector
     elif strategy == "xpath":
@@ -249,6 +242,11 @@ def _sanitize_field_program(
     else:
         return None
 
+    attribute = _clean_optional_text(payload.get("attribute"))
+    if attribute and strategy in {"css", "xpath"}:
+        if not re.fullmatch(r"[a-zA-Z_][\w:.-]*", attribute):
+            return None
+        normalized_payload["attribute"] = attribute
     return FieldProgramSpec.model_validate(normalized_payload)
 
 
@@ -308,6 +306,7 @@ def _program_identity(program: FieldProgramSpec) -> tuple[Any, ...]:
         program.field_name,
         program.strategy,
         program.selector,
+        program.attribute,
         program.pattern,
         program.label,
         tuple(program.labels),

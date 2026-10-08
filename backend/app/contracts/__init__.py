@@ -20,6 +20,7 @@ from app.contracts.benchmark import (
     BenchmarkItem,
     BenchmarkMethodResult,
     BenchmarkReport,
+    MetricEnvelope,
 )
 from app.contracts.evidence import (
     EvidenceBundle,
@@ -35,7 +36,16 @@ from app.contracts.extraction import (
 )
 from app.contracts.page import PageObservation, ViewBundle
 from app.contracts.program import FieldProgramSpec, ProgramSpec
+from app.contracts.rsi import RSIIterationRequest, RSIIterationResponse
 from app.contracts.schema import FieldSpec, SchemaSpec
+from app.contracts.single_page import (
+    BodyCandidate,
+    BodyQualityMetrics,
+    BodySelection,
+    PageIntentAssessment,
+    PageStructureSignature,
+    StructureCompatibility,
+)
 from app.contracts.state import GraphRunState
 from app.contracts.trace import AgentRunTrace
 from app.contracts.types import (
@@ -52,6 +62,12 @@ __all__ = [
     "BenchmarkItem",
     "BenchmarkMethodResult",
     "BenchmarkReport",
+    "BodyCandidate",
+    "BodyQualityMetrics",
+    "BodySelection",
+    "MetricEnvelope",
+    "RSIIterationRequest",
+    "RSIIterationResponse",
     "BenchmarkRequest",
     "BenchmarkResponse",
     "EvidenceBundle",
@@ -70,12 +86,15 @@ __all__ = [
     "ManualReviewRequest",
     "ManualReviewResponse",
     "PageObservation",
+    "PageIntentAssessment",
+    "PageStructureSignature",
     "PostprocessFunction",
     "ProgramSpec",
     "ProgramStrategy",
     "SchemaSpec",
     "SpecAssistantRequest",
     "SpecAssistantResponse",
+    "StructureCompatibility",
     "VerificationIssue",
     "VerificationReport",
     "ViewBundle",

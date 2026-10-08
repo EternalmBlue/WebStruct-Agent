@@ -1,7 +1,7 @@
 
 import pytest
-from app.main import app
 from app.features.schema_center.catalog import get_builtin_schemas
+from app.main import app
 from fastapi.testclient import TestClient
 
 client = TestClient(app)

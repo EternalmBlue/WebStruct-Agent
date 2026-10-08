@@ -9,7 +9,9 @@ from app.features.schema_center.repository import persist_schema_version
 from app.features.schema_center.validation import validate_schema_spec
 from pytest_bdd import given, scenarios, then, when
 
-scenarios("schema-center.feature")
+from tests.bdd.feature_paths import feature_path
+
+scenarios(feature_path("schema-center.feature"))
 
 pytestmark = pytest.mark.db
 
