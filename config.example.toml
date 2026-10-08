@@ -1,0 +1,43 @@
+[app]
+name = "WebStruct-Agent"
+environment = "local"
+host = "127.0.0.1"
+port = 8000
+cors_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
+
+[database]
+url = "sqlite:///backend/webstruct_agent.db"
+
+[model]
+api_key = ""
+base_url = "https://api.deepseek.com"
+name = "deepseek-chat"
+timeout_seconds = 30
+
+[browser]
+provider = "cloakbrowser"
+sdk_version = "0.5.12"
+binary_version = "147.0.7727.31"
+executable_path = ""
+cache_path = ".browser-cache"
+license_key = ""
+auto_download = true
+allow_http_fallback = true
+navigation_timeout_ms = 15000
+http_timeout_seconds = 8
+
+[monitoring]
+poll_interval_ms = 1000
+health_interval_ms = 5000
+max_workers = 2
+event_page_size = 200
+retain_business_payload = true
+
+[benchmark]
+confidence_threshold = 0.8
+estimated_chars_per_token = 4
+
+[frontend]
+host = "127.0.0.1"
+port = 5173
+api_target = "http://127.0.0.1:8000"

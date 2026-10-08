@@ -1,7 +1,20 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import fs from "node:fs";
+import path from "node:path";
 
-const apiTarget = process.env.VITE_API_TARGET ?? "http://127.0.0.1:8000";
+function readApiTarget() {
+  const configPath = path.resolve(__dirname, "../config.toml");
+  try {
+    const text = fs.readFileSync(configPath, "utf8");
+    const frontend = text.match(/\[frontend\]([\s\S]*?)(?=\n\[|$)/)?.[1] ?? "";
+    return frontend.match(/api_target\s*=\s*"([^"]+)"/)?.[1] ?? "http://127.0.0.1:8000";
+  } catch {
+    return "http://127.0.0.1:8000";
+  }
+}
+
+const apiTarget = readApiTarget();
 
 export default defineConfig({
   plugins: [react()],

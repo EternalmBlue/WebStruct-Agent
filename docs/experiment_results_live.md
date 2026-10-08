@@ -2,7 +2,8 @@
 
 ## Dataset
 
-The built-in benchmark currently contains 9 checked-in Chinese HTML fixtures: 3 university notices, 3 job postings, and 3 government-policy pages.
+The checked-in benchmark dataset contains 9 Chinese HTML fixtures: 3 university notices, 3 job postings, and 3 government-policy pages.
+Each item carries its Schema explicitly; these fixtures are not runtime built-in Schema templates.
 This table was generated with the configured live OpenAI-compatible provider when available; LLM methods are expected to fail explicitly if credentials are absent.
 
 ## Benchmark Summary

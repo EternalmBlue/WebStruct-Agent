@@ -1,5 +1,6 @@
 import type {
   BenchmarkResponse,
+  BenchmarkDataset,
   ExtractionResponse,
   HealthStatus,
   ManualReviewResponse,
@@ -9,6 +10,7 @@ import type {
   SchemaValidationResponse,
   SpecAssistantResponse,
   VerifiedProgramSpecSummary,
+  RunSnapshot,
 } from "../types/webstruct";
 
 type CreateExtractionRequest = {
@@ -48,13 +50,15 @@ export async function loadHealthStatus(): Promise<HealthStatus> {
   return readJsonResponse<HealthStatus>(response);
 }
 
-export async function loadBuiltinSchemas(): Promise<SchemaSpec[]> {
+export async function loadSchemas(): Promise<SchemaSpec[]> {
   const response = await fetch("/api/schemas");
   if (!response.ok) {
     throw new Error(`schemas HTTP ${response.status}`);
   }
   return readJsonResponse<SchemaSpec[]>(response);
 }
+
+export const loadBuiltinSchemas = loadSchemas;
 
 export async function loadVerifiedProgramSpecs(): Promise<
   VerifiedProgramSpecSummary[]
@@ -78,7 +82,8 @@ export async function validateSchema(
 }
 
 export async function runExtractionRequest(
-  request: CreateExtractionRequest | RunVerifiedExtractionRequest
+  request: CreateExtractionRequest | RunVerifiedExtractionRequest,
+  onProgress?: (snapshot: RunSnapshot) => void,
 ): Promise<ExtractionResponse> {
   const schema = request.mode === "run_verified" ? request.schema : request.schema ?? null;
   const useSchema = Boolean(schema);
@@ -89,27 +94,52 @@ export async function runExtractionRequest(
     }
   }
 
+  const body: Record<string, unknown> = {
+    target_url: request.targetUrl,
+    html: request.htmlInput,
+    program_spec: request.mode === "create" ? request.programSpec ?? null : null,
+    program_spec_mode: request.mode === "run_verified" ? "run_verified" : "create",
+    persist_result: true,
+    reuse_verified_program: request.mode === "run_verified",
+  };
+  if (schema) {
+    body.schema_name = schema.name;
+    body.schema_spec = schema;
+  }
   const response = await fetch("/api/extract", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      target_url: request.targetUrl,
-      html: request.htmlInput,
-      schema_name: schema ? schema.name : "",
-      schema_spec: schema,
-      program_spec: request.mode === "create" ? request.programSpec ?? null : null,
-      program_spec_mode: request.mode === "run_verified" ? "run_verified" : "create",
-      persist_result: true,
-      reuse_verified_program: request.mode === "run_verified",
-    }),
+    body: JSON.stringify(body),
   });
-  const data = await readJsonResponse<ExtractionResponse & { detail?: string }>(
+  const data = await readJsonResponse<(ExtractionResponse & { detail?: string }) | RunSnapshot>(
     response
   );
   if (!response.ok) {
-    throw new Error(data.detail || data.errors?.join("；") || `HTTP ${response.status}`);
+    const detail = "detail" in data ? data.detail : undefined;
+    const errors = "errors" in data ? data.errors : [];
+    throw new Error(detail || errors?.join("；") || `HTTP ${response.status}`);
+  }
+  if (!("schema_spec" in data)) {
+    return pollExtractionRun(data.task_id, onProgress);
   }
   return data;
+}
+
+export async function pollExtractionRun(
+  taskId: string,
+  onProgress?: (snapshot: RunSnapshot) => void,
+): Promise<ExtractionResponse> {
+  for (;;) {
+    const statusResponse = await fetch(`/api/runs/${taskId}`);
+    const snapshot = await readJsonResponse<RunSnapshot>(statusResponse);
+    onProgress?.(snapshot);
+    const response = await fetch(`/api/extract/${taskId}`);
+    const data = await readJsonResponse<ExtractionResponse | RunSnapshot>(response);
+    if ("schema_spec" in data && data.status !== "queued" && data.status !== "running") {
+      return data;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
 }
 
 export async function reviseSpecWithAssistant({
@@ -139,18 +169,42 @@ export async function reviseSpecWithAssistant({
 }
 
 export async function runBenchmarkRequest(
-  schemaName: string
+  dataset: BenchmarkDataset,
+  onProgress?: (snapshot: RunSnapshot) => void,
 ): Promise<BenchmarkResponse> {
   const response = await fetch("/api/benchmark/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ schema_name: schemaName || "高校通知" }),
+    body: JSON.stringify({ dataset }),
   });
-  const data = await readJsonResponse<BenchmarkResponse>(response);
+  const data = await readJsonResponse<BenchmarkResponse | RunSnapshot>(response);
   if (!response.ok) {
     throw new Error(data.errors?.join("；") || `HTTP ${response.status}`);
   }
+  if (!("benchmark_report" in data)) {
+    if (!data.task_id) {
+      throw new Error("benchmark response did not include task_id");
+    }
+    return pollBenchmarkRun(data.task_id, onProgress);
+  }
   return data;
+}
+
+export async function pollBenchmarkRun(
+  taskId: string,
+  onProgress?: (snapshot: RunSnapshot) => void,
+): Promise<BenchmarkResponse> {
+  for (;;) {
+    const statusResponse = await fetch(`/api/runs/${taskId}`);
+    const snapshot = await readJsonResponse<RunSnapshot>(statusResponse);
+    onProgress?.(snapshot);
+    const response = await fetch(`/api/benchmark/reports/${taskId}`);
+    const data = await readJsonResponse<BenchmarkResponse | RunSnapshot>(response);
+    if ("benchmark_report" in data && data.status !== "queued" && data.status !== "running") {
+      return data;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
 }
 
 export async function submitManualReviewRequest({

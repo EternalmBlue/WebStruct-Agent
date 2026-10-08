@@ -1,0 +1,21 @@
+# Python 静态检查配置：只做「正确性 + 可读性」层面的约束，不做风格枷锁。
+line-length = 100
+target-version = "py311"
+
+[lint]
+select = [
+    "E",  # pycodestyle 错误
+    "F",  # pyflakes（未使用导入、未定义名称）
+    "I",  # import 排序
+    "UP", # Python 3.11 语法现代化
+]
+ignore = [
+    "E501", # 长行交给 formatter 处理，不在 CI 里卡人
+]
+
+[lint.per-file-ignores]
+"tests/**" = ["E402"]
+
+[format]
+quote-style = "double"
+indent-style = "space"

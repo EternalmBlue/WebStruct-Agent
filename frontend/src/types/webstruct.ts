@@ -5,6 +5,25 @@ export type HealthStatus = {
   llm_configured: boolean;
   llm_model: string;
   database_driver: string;
+  config_source?: string;
+  config_loaded?: boolean;
+  browser?: { available: boolean; provider: string; version?: string; reason?: string | null };
+  observability?: { available: boolean; summary: string };
+};
+
+export type RunSnapshot = {
+  task_id: string;
+  correlation_id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  current_node: string | null;
+  completed_node_count: number;
+  total_node_count: number;
+  progress: number;
+  updated_at: string;
+  event_cursor: number;
+  runtime_ms?: number | null;
+  errors: string[];
+  original_task_id?: string | null;
 };
 
 export type FieldType = "string" | "text" | "number" | "date" | "url" | "list";
@@ -72,6 +91,7 @@ export type ProgramSpecSummary = {
 
 export type ExtractionResponse = {
   task_id: string;
+  correlation_id?: string;
   status: string;
   schema_spec: SchemaSpec;
   schema_generation_mode?: string;
@@ -121,23 +141,43 @@ export type ReviewField = {
 };
 
 export type BenchmarkResponse = {
+  task_id?: string;
+  correlation_id?: string;
   status: string;
   benchmark_report?: {
     dataset_name: string;
     summary: string;
     methods: Array<{
       method: string;
-      field_accuracy: number;
-      required_field_missing_rate: number;
-      schema_adherence: number;
-      evidence_precision: number;
-      average_confidence: number;
-      program_reuse_rate: number;
-      selective_accuracy: number;
+      field_accuracy: number | null;
+      required_field_missing_rate: number | null;
+      schema_adherence: number | null;
+      evidence_precision: number | null;
+      average_confidence: number | null;
+      program_reuse_rate: number | null;
+      selective_accuracy: number | null;
       repair_success_rate?: number | null;
+      estimated_token_cost?: number | null;
+      runtime_ms?: number | null;
+      metric_sources?: Record<string, string>;
+      unavailable_reasons?: Record<string, string>;
     }>;
   } | null;
   errors: string[];
+};
+
+export type BenchmarkItem = {
+  item_id: string;
+  url?: string;
+  html: string;
+  schema_name?: string;
+  schema_spec: SchemaSpec;
+  gold_record: Record<string, string>;
+};
+
+export type BenchmarkDataset = {
+  name: string;
+  items: BenchmarkItem[];
 };
 
 export type ConnectionState = "checking" | "online" | "offline";

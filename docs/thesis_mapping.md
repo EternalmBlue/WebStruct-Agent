@@ -18,8 +18,8 @@
 The current repository can support a local thesis prototype demonstration:
 
 - Multi-agent collaboration is represented by LangGraph nodes and `AgentRunTrace`.
-- Schema-first extraction is represented by `SchemaSpec` and built-in Chinese domain schemas.
-- Page acquisition and multi-view representation are represented by Playwright
+- Schema-first extraction is represented by explicit user/model-generated `SchemaSpec` values.
+- Page acquisition and multi-view representation are represented by CloakBrowser
   collection, normalized text, headings, lines, and text blocks with selector/xpath hints.
 - Programmatic extraction is represented by the safe `ProgramSpec` DSL.
 - Hybrid extraction is represented by deterministic ProgramSpec execution plus

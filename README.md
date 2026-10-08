@@ -6,6 +6,10 @@ WebStruct-Agent is a local research prototype for the undergraduate thesis proje
 
 The project is an information extraction workbench, not a commercial SaaS product. The MVP focuses on a runnable local demo, a clear LangGraph-based workflow foundation, schema-first extraction, evidence-aware results, and benchmark support.
 
+This repository follows a **spec-first + BDD** discipline: behavior is defined in
+`specs/features/*.feature` first, then automated with `pytest-bdd`, and only then implemented
+inside a feature center. See [`specs/README.md`](./specs/README.md).
+
 ## Tech Stack
 
 Backend:
@@ -14,10 +18,10 @@ Backend:
 - FastAPI
 - Pydantic
 - SQLAlchemy
-- PostgreSQL
+- SQLite (default local database) or PostgreSQL (Docker Compose)
 - LangGraph
-- Playwright Python
-- pytest
+- CloakBrowser SDK (rendered collection adapter; HTTP fallback is explicit)
+- pytest + pytest-bdd
 
 Frontend:
 
@@ -28,7 +32,7 @@ Frontend:
 LLM:
 
 - DeepSeek is the default OpenAI-compatible provider.
-- Model credentials are read from environment variables only.
+- Runtime settings and sensitive credentials are loaded only from the local `config.toml`.
 
 ## Project Structure
 
@@ -36,28 +40,40 @@ LLM:
 webstruct-agent/
   README.md
   AGENTS.md
-  .env.example
+  specs/                 spec-first 唯一事实来源：功能中心行为契约
+    feature-centers.md   功能中心 ↔ 实现 ↔ 测试 的索引
+    features/*.feature   Gherkin 场景（pytest-bdd 直接执行这些文件）
   backend/
   frontend/
   data/
   docs/
 ```
 
-Backend package layout:
+Backend package layout — organized into **feature centers** plus a shared **platform**:
 
 ```text
 backend/app/
-  api/          FastAPI routers only
-  benchmark/    benchmark dataset, metrics, benchmark_nodes, and LangGraph workflow
-  core/         settings and runtime configuration
-  domain/       Pydantic models, API contracts, and typed graph state
-  extraction/   schema catalog, Playwright collection, page/view normalization,
-                fallback routing, ProgramSpec execution, verifier, repair,
-                agent_nodes, and LangGraph workflow
-  storage/      SQLAlchemy engine, ORM models, automatic migrations, and
-                domain-specific repositories
-  workflows/    shared traceable LangGraph node helpers
+  contracts/    类型化契约对象：SchemaSpec / ProgramSpec / EvidenceBundle /
+                VerificationReport / AgentRunTrace / GraphRunState
+  features/     功能中心，每个中心自带 router / service / workflow / repository
+    ops_center/           健康检查与运行保障
+    schema_center/        用户/模型 Schema、校验与版本留存
+    page_center/          页面采集与多视图归一化
+    program_center/       ProgramSpec 确定性生成、安全净化、已验证程序复用
+    extraction_center/    LangGraph 九节点主链路 + 证据/校验/修复
+    evaluation_center/    五种方法对比评测与指标报告
+    review_center/        人工复核回写与程序登记
+    spec_assistant_center/对话式 Schema/ProgramSpec 修订
+  platform/     跨中心复用的技术能力
+    config.py           运行时配置与模型凭据
+    persistence/        引擎、自动迁移、ORM 模型、通用 JSON 载荷读写
+    llm/                ModelAdapter 协议及其实现（未配置时显式失败）
+    tracing/            统一的图节点追踪执行器
+    text_processing.py  文本归一化与证据片段处理
 ```
+
+Each feature center maps 1:1 to a `.feature` spec and a BDD test module.
+The full mapping lives in [`specs/feature-centers.md`](./specs/feature-centers.md).
 
 Frontend source layout:
 
@@ -65,9 +81,21 @@ Frontend source layout:
 frontend/src/
   api/          typed backend API clients
   components/   reusable workbench presentation panels
+  features/     feature-aligned panels (extraction / schema / program / verification /
+                review / evaluation)
   lib/          formatting, sample HTML, schema draft, and review helpers
   pages/        route-level page composition
   types/        shared WebStruct TypeScript contracts
+```
+
+Test layout:
+
+```text
+backend/tests/
+  conftest.py   共享夹具（默认断开真实 LLM 调用；db 标记按数据库可达性跳测）
+  bdd/          行为测试：每个模块绑定一个 specs/features/*.feature
+  unit/         按功能中心分组的细粒度单元测试
+  support/      测试数据基元
 ```
 
 ## Backend Setup
@@ -80,11 +108,10 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-Install Playwright browser binaries:
+Copy the configuration template and edit it locally:
 
 ```powershell
-cd backend
-python -m playwright install
+Copy-Item config.example.toml config.toml
 ```
 
 Start the backend:
@@ -100,6 +127,9 @@ Health check:
 Invoke-RestMethod http://127.0.0.1:8000/api/health
 ```
 
+> `config.toml` is resolved from the project root and relative paths are anchored to
+> that file, so the service can be started from either the project root or `backend/`.
+
 ## Frontend Setup
 
 ```powershell
@@ -114,30 +144,35 @@ The frontend runs at:
 http://127.0.0.1:5173
 ```
 
-The Vite dev server proxies `/api` requests to the FastAPI backend at `http://127.0.0.1:8000`.
-If the backend is running on another local port, start Vite with `VITE_API_TARGET`:
-
-```powershell
-cd frontend
-$env:VITE_API_TARGET="http://127.0.0.1:8010"
-npm run dev
-```
+The Vite dev server proxies `/api` requests using `[frontend].api_target`
+from the project-root `config.toml`. Change that TOML value and restart Vite
+when the backend runs on another local port.
 
 ## LLM Configuration
 
 LLM fallback uses an OpenAI-compatible chat-completions API. DeepSeek is the default provider.
-Set credentials in the environment or local `.env` file. Do not hard-code API keys in source code.
+Set the model key, optional browser license, and `browser.auto_download` directly in `config.toml`.
+The file is ignored by Git and is mounted read-only in Docker. Environment variables
+and `.env` are not loaded or used as overrides.
+When `browser.auto_download = true`, a missing pinned CloakBrowser binary is provisioned
+on the first URL collection into `browser.cache_path`; health checks report the pending
+browser state until that collection occurs.
 
-Copy `.env.example` to `.env` when local overrides are needed:
+## Database Configuration
 
-```powershell
-Copy-Item .env.example .env
+The `[database].url` item in `config.toml` decides the storage backend:
+
+```text
+sqlite:///./webstruct_agent.db                                      # 本地默认，开箱即用
+postgresql+psycopg://webstruct:webstruct@127.0.0.1:5432/webstruct_agent  # Docker Compose
 ```
+
+Tables are created/updated automatically on backend startup (SQLAlchemy metadata plus
+idempotent column additions).
 
 ## Docker Setup
 
-The recommended deployable local setup uses Docker Compose with PostgreSQL,
-FastAPI, and Nginx-hosted frontend containers:
+Docker Compose packages PostgreSQL, FastAPI, and the Nginx-hosted frontend:
 
 ```powershell
 docker compose up --build
@@ -149,21 +184,23 @@ Then open:
 http://127.0.0.1:5173
 ```
 
-The compose stack starts:
+The compose stack starts, with dependency gating by healthcheck:
 
 - `postgres`: PostgreSQL 16 with persistent volume `postgres_data`
-- `backend`: FastAPI service on `http://127.0.0.1:8000`
-- `frontend`: Nginx static frontend on `http://127.0.0.1:5173`, proxying `/api` to backend
+- `backend`: FastAPI service on `http://127.0.0.1:8000` (waits for healthy postgres)
+- `frontend`: Nginx static frontend on `http://127.0.0.1:5173` (waits for healthy backend),
+  proxying `/api` to backend
 
-Backend startup runs automatic table migration through SQLAlchemy metadata:
-missing tables are created and missing columns are added idempotently.
+Both images ship a
+`.dockerignore` so local `.venv`, `node_modules`, caches, logs, and tests never enter the
+build context.
 
-For LLM fallback inside Docker, copy `backend.env.example` to `backend.env` and
-fill provider settings locally. `backend.env` is ignored by Git.
+For Docker, mount the same local `config.toml` read-only and set the desired database
+and model values there.
 
 ## Core APIs
 
-The backend now exposes a runnable LangGraph extraction workflow:
+The backend exposes a runnable LangGraph extraction workflow:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/api/schemas
@@ -179,15 +216,18 @@ Invoke-RestMethod `
   -Body '{"name":"高校通知","domain":"university_notice","fields":[{"name":"title","description":"通知标题","type":"text","required":true,"aliases":["标题"],"examples":[]}]}'
 ```
 
-Run the built-in demo extraction:
+Submit an extraction (the response is a 202 queued receipt):
 
 ```powershell
 Invoke-RestMethod `
   -Method Post `
   -ContentType "application/json" `
   -Uri http://127.0.0.1:8000/api/extract `
-  -Body '{"target_url":"https://example.edu/notice/001","html":"<html><body><h1>关于开展2026年大学生创新训练项目申报的通知</h1><p>发布单位：教务处</p><p>发布日期：2026年06月12日</p><p>申报截止：2026年06月30日</p></body></html>","schema_name":"高校通知"}'
+  -Body '{"target_url":"https://example.edu/notice/001","html":"<html><body><h1>课程公告</h1></body></html>","schema_spec":{"name":"课程公告","domain":"course_notice","description":"课程公告字段","fields":[{"name":"title","description":"公告标题","type":"text","required":true,"aliases":["标题"],"examples":[]}]}}'
 ```
+
+Use `GET /api/runs/{task_id}` and `GET /api/runs/{task_id}/events?after_cursor=...`
+for progress, then `GET /api/extract/{task_id}` for the terminal result.
 
 Revise the current task's SchemaSpec and ProgramSpec with the spec assistant:
 
@@ -200,17 +240,17 @@ Invoke-RestMethod `
 ```
 
 The assistant endpoint reads the saved task's page `ViewBundle`, returns a
-draft revised `SchemaSpec` and safe `ProgramSpec`, and does not mark the draft
-as user verified.
+draft revised `SchemaSpec` and a **sanitized** `ProgramSpec` (unsupported strategies are
+dropped and reported in `validation_issues`), and does not mark the draft as user verified.
 
-Run the built-in benchmark demo:
+Run a benchmark only when every item supplies an explicit SchemaSpec:
 
 ```powershell
 Invoke-RestMethod `
   -Method Post `
   -ContentType "application/json" `
   -Uri http://127.0.0.1:8000/api/benchmark/run `
-  -Body '{"schema_name":"高校通知"}'
+  -Body '{"dataset":{"name":"my-dataset","items":[{"item_id":"sample-1","html":"<html>...</html>","schema_spec":{"name":"课程公告","domain":"course_notice","description":"课程公告字段","fields":[{"name":"title","description":"公告标题","type":"text","required":true,"aliases":["标题"],"examples":[]}]}, "gold_record":{"title":"课程公告"}}]}}'
 ```
 
 Persisted results can be read back with:
@@ -218,20 +258,40 @@ Persisted results can be read back with:
 ```text
 GET /api/extract/{task_id}
 GET /api/benchmark/reports/{task_id}
+GET /api/schemas/versions
+GET /api/program-specs/verified
 ```
 
 ## Tests
 
-Run backend tests:
+Run all backend tests (BDD scenarios + unit tests):
 
 ```powershell
 cd backend
 pytest
 ```
 
-Persistence/API integration tests require a reachable PostgreSQL database from
-`DATABASE_URL`. Start `docker compose up -d postgres` first to run the full
-backend suite locally.
+Run only one feature center's behavior suite:
+
+```powershell
+cd backend
+pytest tests/bdd/test_extraction_center.py
+pytest -k "评测"           # 中文场景名可直接用于 -k 过滤
+```
+
+Notes:
+
+- Tests never call real LLM providers: a conftest fixture disables credentials by default,
+  so failures are deterministic and offline-safe.
+- Cases requiring a real database are marked `@pytest.mark.db` and skipped only when the
+  configured database is unreachable. With the default SQLite URL, the full suite runs locally.
+
+Lint/fix imports before committing:
+
+```powershell
+cd backend
+python -m ruff check app tests
+```
 
 Build the frontend:
 
@@ -244,26 +304,27 @@ npm run build
 
 Stage 4 is a thesis-ready local demo foundation:
 
-- typed domain models for SchemaSpec, ProgramSpec, evidence, verification, graph state, and benchmark reports
-- built-in schemas for 高校通知, 招聘公告, and 政务公开 / 政策法规
-- LangGraph extraction workflow with the required named nodes
+- typed contract objects for SchemaSpec, ProgramSpec, evidence, verification, graph state, and benchmark reports
+  - no runtime built-in domain schemas; user/model-generated Schema versions remain persisted
+- LangGraph extraction workflow with the required named nodes and status-guarded edges
 - URL-first create mode where page collection and view normalization happen
   before SchemaAgent inference unless the user explicitly supplies a schema
-- Playwright-first rendered page collection with urllib fallback
+  - CloakBrowser-first rendered page collection with explicitly recorded HTTP fallback
 - normalized page text plus DOM/text blocks with selector and xpath hints
 - safe ProgramSpec DSL execution without `eval` or `exec`
-- DeepSeek/OpenAI-compatible LLM fallback through `ModelAdapter`
+- DeepSeek/OpenAI-compatible LLM fallback through `ModelAdapter`, failing explicitly without credentials
 - fallback decision routing for missing, low-confidence, weak-evidence, confused, or type-invalid fields
 - field-level evidence, confidence, verification, and one repair pass
-- PostgreSQL persistence for extraction run payloads, schema versions, and benchmark reports
+- persistence for extraction run payloads, schema versions, benchmark reports, user-verified programs, and manual reviews
+- failed runs keep the `failed` status instead of being masked as completed
 - automatic table migration on backend startup
-- Docker Compose packaging for PostgreSQL, backend, and frontend
+- Docker Compose packaging with healthcheck-gated startup
 - benchmark workflow with the required benchmark nodes and five comparison methods
 - React extraction workbench with schema selection/editing, schema validation, URL/HTML input, results, evidence, verification report, agent trace, and benchmark table
 - manual review API and frontend panel for confirming/editing field values
 - SpecCollaborationAgent API and frontend panel for human-AI draft revision of
   SchemaSpec and ProgramSpec from the current task's page context
 - user-verified ProgramSpec storage and reuse for matching schema signatures
-- schema version read-back through `GET /api/schemas/versions`
+- spec-first BDD suite wired to `specs/features/*.feature` for all eight feature centers
 
 Thesis support artifacts are available under `docs/`: demo screenshot, live and offline benchmark tables, plus success/failure case analysis.

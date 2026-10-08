@@ -1,21 +1,40 @@
+# 凭据只在本地保留，永远不进仓库
 .env
-backend.env
+config.toml
+.browser-cache/
+*.env.local
+
+# 运行日志与临时目录
+*.log
+.agents/
+.codex*/
+.workbuddy/
+.playwright-mcp/
+
+# Python 缓存
 *.pyc
 __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 
+# 本地依赖与数据库
 backend/.venv/
-backend/webstruct_agent.db
+backend/*.db
 webstruct_agent.db
 
+# 前端构建产物
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
+frontend/vite.config.ts.timestamp-*
+
+# IDE
+.idea/
+.vscode/
 
 .DS_Store
 Thumbs.db

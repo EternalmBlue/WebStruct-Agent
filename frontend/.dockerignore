@@ -1,0 +1,9 @@
+# 依赖由 npm ci 在镜像内安装，不要把本机 node_modules 上传为构建上下文
+node_modules/
+dist/
+.vite/
+*.local
+*.log
+*.tsbuildinfo
+config.toml
+.env

@@ -8,6 +8,6 @@ export function formatValue(value: unknown): string {
   return String(value);
 }
 
-export function formatPercent(value: number): string {
-  return `${Math.round(value * 100)}%`;
+export function formatPercent(value: number | null | undefined): string {
+  return value === null || value === undefined ? "不可用" : `${Math.round(value * 100)}%`;
 }

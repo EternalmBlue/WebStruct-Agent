@@ -76,7 +76,7 @@ Node order:
 4. `metric_agent_node`
 5. `report_agent_node`
 
-The built-in benchmark uses checked-in Chinese HTML fixtures for thesis interface and metric demonstration. It compares Direct LLM, LLM + Schema, Program Only, Hybrid without Verifier, and Ours Full.
+The benchmark workflow may use checked-in Chinese HTML fixtures for thesis interface and metric demonstration. Each fixture supplies its Schema explicitly; no runtime domain-template catalog is consulted. It compares Direct LLM, LLM + Schema, Program Only, Hybrid without Verifier, and Ours Full.
 
 `report_agent_node` persists the benchmark report payload so experiment results
 can be read back through `GET /api/benchmark/reports/{task_id}`.

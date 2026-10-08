@@ -1,5 +1,14 @@
 # AGENTS.md
 
+## Implementation Overrides (confirmed 2026-10-07)
+
+The later approved implementation decisions supersede legacy MVP bullets below:
+
+- Runtime domain Schema templates are removed; user/model-generated SchemaSpec values are explicit inputs.
+- All settings and sensitive credentials come from the project-root `config.toml`; `.env` and environment overrides are not loaded.
+- Rendered page collection uses the CloakBrowser adapter. Its transitive Playwright dependency is not a project-level browser fallback.
+- Extraction and benchmark submissions are asynchronous 202 responses with persisted task/event observability.
+
 ## Project
 
 This repository is for the undergraduate thesis project:
@@ -109,7 +118,7 @@ Backend:
 - SQLAlchemy
 - SQLite
 - LangGraph
-- Playwright Python
+- CloakBrowser SDK (its internal Playwright dependency is not the application browser)
 - pytest
 
 Frontend:
@@ -123,7 +132,7 @@ LLM:
 
 - Use a ModelAdapter abstraction
 - DeepSeek is the default OpenAI-compatible provider
-- Model credentials must be read from environment variables only
+- Model credentials must be read from `config.toml` only; environment variables and `.env` are ignored
 - ProgramSpec deterministic extraction may run without an API key
 - LLM fallback must fail explicitly when provider credentials are missing
 
@@ -239,13 +248,10 @@ The verifier must check at least:
 6. Empty or low-quality evidence
 7. Confidence score calculation
 
-## Built-in Schemas
+## Schema Templates
 
-Provide at least three Chinese domain schemas:
-
-1. 高校通知
-2. 招聘公告
-3. 政务公开 / 政策法规
+Do not ship runtime domain templates. Chinese HTML fixtures may exist under `data/`
+for explicit benchmark inputs, each carrying its own SchemaSpec.
 
 ## Benchmark Requirements
 

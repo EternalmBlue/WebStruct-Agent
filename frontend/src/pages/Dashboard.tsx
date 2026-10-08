@@ -10,24 +10,25 @@ import {
 } from "@phosphor-icons/react";
 
 import {
-  loadBuiltinSchemas,
+  loadSchemas,
   loadHealthStatus,
   loadVerifiedProgramSpecs,
+  pollExtractionRun,
   reviseSpecWithAssistant,
   runBenchmarkRequest,
   runExtractionRequest,
   submitManualReviewRequest,
 } from "../api/webstructApi";
-import { AgentTracePanel } from "../components/dashboard/AgentTracePanel";
-import { BenchmarkPanel } from "../components/dashboard/BenchmarkPanel";
-import { EvidencePanel } from "../components/dashboard/EvidencePanel";
-import { ExtractionResultsPanel } from "../components/dashboard/ExtractionResultsPanel";
-import { FieldEditor } from "../components/dashboard/FieldEditor";
-import { ManualReviewPanel } from "../components/dashboard/ManualReviewPanel";
-import { ProgramSpecPreviewPanel } from "../components/dashboard/ProgramSpecPreviewPanel";
-import { RunStateBadge } from "../components/dashboard/RunStateBadge";
-import { VerificationReportPanel } from "../components/dashboard/VerificationReportPanel";
-import { WorkflowRail } from "../components/dashboard/WorkflowRail";
+import { AgentTracePanel } from "../features/extraction/AgentTracePanel";
+import { BenchmarkPanel } from "../features/evaluation/BenchmarkPanel";
+import { EvidencePanel } from "../features/verification/EvidencePanel";
+import { ExtractionResultsPanel } from "../features/extraction/ExtractionResultsPanel";
+import { FieldEditor } from "../features/schema/FieldEditor";
+import { ManualReviewPanel } from "../features/review/ManualReviewPanel";
+import { ProgramSpecPreviewPanel } from "../features/program/ProgramSpecPreviewPanel";
+import { RunStateBadge } from "../features/extraction/RunStateBadge";
+import { VerificationReportPanel } from "../features/verification/VerificationReportPanel";
+import { WorkflowRail } from "../features/extraction/WorkflowRail";
 import { sampleHtml } from "../lib/sampleHtml";
 import {
   appendEmptyField,
@@ -37,6 +38,7 @@ import {
 } from "../lib/schemaDraft";
 import { toReviewFields } from "../lib/reviewFields";
 import type {
+  BenchmarkDataset,
   BenchmarkResponse,
   ConnectionState,
   ExtractionResponse,
@@ -127,7 +129,7 @@ export function Dashboard() {
       try {
         const [healthData, schemaData] = await Promise.all([
           loadHealthStatus(),
-          loadBuiltinSchemas(),
+          loadSchemas(),
         ]);
         if (!cancelled) {
           setHealth(healthData);
@@ -161,6 +163,40 @@ export function Dashboard() {
   }, []);
 
   useEffect(() => {
+    const rawTask = window.localStorage.getItem("webstruct.activeTask");
+    const legacyTaskId = window.localStorage.getItem("webstruct.activeTaskId");
+    let activeTask: { kind?: string; task_id?: string } | null = null;
+    if (rawTask) {
+      try {
+        activeTask = JSON.parse(rawTask) as { kind?: string; task_id?: string };
+      } catch {
+        window.localStorage.removeItem("webstruct.activeTask");
+      }
+    }
+    if (!activeTask && legacyTaskId) {
+      activeTask = { kind: "extraction", task_id: legacyTaskId };
+    }
+    if (!activeTask?.task_id || activeTask.kind !== "extraction" || extraction || runState === "running") {
+      return;
+    }
+    setRunState("running");
+    pollExtractionRun(activeTask.task_id, (snapshot) => {
+      setRunState(snapshot.status === "failed" ? "failed" : "running");
+    })
+      .then((data) => {
+        setExtraction(data);
+        setReviewFields(toReviewFields(data));
+        setRuleName(defaultRuleName(data));
+        setRunState(data.status === "failed" ? "failed" : "done");
+        window.localStorage.removeItem("webstruct.activeTask");
+        window.localStorage.removeItem("webstruct.activeTaskId");
+      })
+      .catch(() => {
+        setError("状态暂未更新，已保留上次任务数据。");
+      });
+  }, []);
+
+  useEffect(() => {
     if (workMode === "run") {
       if (!verifiedProgramSpecs.length) {
         setSchemaDraft(null);
@@ -185,7 +221,16 @@ export function Dashboard() {
     }
 
     if (!schemas.length) {
-      setSchemaDraft(null);
+      setSchemaDraft(
+        useCustomSchema
+          ? {
+              name: "自定义 Schema",
+              description: "",
+              domain: "",
+              fields: [],
+            }
+          : null,
+      );
       return;
     }
     const selectedSchema =
@@ -199,6 +244,7 @@ export function Dashboard() {
     selectedSchemaName,
     selectedVerifiedProgramSignature,
     verifiedProgramSpecs,
+    useCustomSchema,
     workMode,
   ]);
 
@@ -264,6 +310,9 @@ export function Dashboard() {
               targetUrl,
               htmlInput,
               schema: schemaDraft!,
+            }, (snapshot) => {
+              window.localStorage.setItem("webstruct.activeTaskId", snapshot.task_id);
+              setRunState(snapshot.status === "failed" ? "failed" : "running");
             })
           : await runExtractionRequest({
               mode: "create",
@@ -271,6 +320,9 @@ export function Dashboard() {
               htmlInput,
               schema: createUsesManualSchema ? schemaDraft : null,
               programSpec: null,
+            }, (snapshot) => {
+              window.localStorage.setItem("webstruct.activeTaskId", snapshot.task_id);
+              setRunState(snapshot.status === "failed" ? "failed" : "running");
             });
       setExtraction(data);
       setReviewFields(toReviewFields(data));
@@ -287,13 +339,33 @@ export function Dashboard() {
   }
 
   async function runBenchmark() {
+    if (!activeSchema) {
+      setError("请先在创建模式中打开“手动字段范围”，提供 Schema 后再运行评测。");
+      return;
+    }
     setBenchmarkState("running");
     setBenchmark(null);
     setError("");
     try {
-      const data = await runBenchmarkRequest(selectedSchemaName || "高校通知");
+      const dataset: BenchmarkDataset = {
+        name: "工作台显式样例评测",
+        items: [{
+          item_id: "workbench-sample",
+          url: targetUrl,
+          html: htmlInput.trim() || sampleHtml,
+          schema_spec: activeSchema,
+          gold_record: {},
+        }],
+      };
+      const data = await runBenchmarkRequest(dataset, (snapshot) => {
+        window.localStorage.setItem(
+          "webstruct.activeTask",
+          JSON.stringify({ kind: "benchmark", task_id: snapshot.task_id }),
+        );
+      });
       setBenchmark(data);
       setBenchmarkState(data.errors.length ? "failed" : "done");
+      window.localStorage.removeItem("webstruct.activeTask");
     } catch (currentError) {
       setBenchmarkState("failed");
       setError(
@@ -674,6 +746,36 @@ export function Dashboard() {
                     </label>
                     {schemaDraft ? (
                       <>
+                        <div className="field-editor-grid schema-meta-grid">
+                          <label className="field-control">
+                            <span>Schema 名称</span>
+                            <input
+                              value={schemaDraft.name}
+                              onChange={(event) =>
+                                setSchemaDraft((current) =>
+                                  current
+                                    ? { ...current, name: event.target.value }
+                                    : current,
+                                )
+                              }
+                              placeholder="例如：课程公告字段"
+                            />
+                          </label>
+                          <label className="field-control">
+                            <span>领域标识</span>
+                            <input
+                              value={schemaDraft.domain}
+                              onChange={(event) =>
+                                setSchemaDraft((current) =>
+                                  current
+                                    ? { ...current, domain: event.target.value }
+                                    : current,
+                                )
+                              }
+                              placeholder="例如：course_notice"
+                            />
+                          </label>
+                        </div>
                         <div className="schema-summary">
                           <span>{schemaDraft.description || schemaDraft.domain}</span>
                           <strong>{schemaDraft.fields.length} fields</strong>
@@ -1027,12 +1129,6 @@ function schemaModeText(
   }
   if (mode === "provided") {
     return "使用固定字段契约";
-  }
-  if (mode === "builtin") {
-    return "使用内置字段契约";
-  }
-  if (mode === "builtin_fallback") {
-    return "AI 不可用，内置兜底";
   }
   return useCustomSchema ? "运行时使用固定字段契约" : "运行时 AI 生成";
 }

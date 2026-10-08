@@ -1,0 +1,20 @@
+# 避免把本地虚拟环境与运行产物塞进构建上下文（否则上下文高达数百 MB）
+.venv/
+config.toml
+.env
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 本地数据库与日志
+*.db
+*.log
+
+# 测试与质量资产不进镜像
+tests/
+pytest.ini
+.ruff.toml

@@ -8,11 +8,11 @@ WebStruct-Agent is a local research-oriented workbench for schema-first web info
 
 The current implementation provides a runnable local thesis demo foundation. The
 system includes URL-first schema creation, schema management and version
-persistence, a React extraction workbench, Playwright-first page collection,
+persistence, a React extraction workbench, CloakBrowser-first page collection,
 multi-view page representation, LangGraph agent workflow, ProgramSpec generation
 and execution, human-AI Spec collaboration, evidence-aware extraction,
 verification, bounded fallback repair, PostgreSQL persistence, real
-OpenAI-compatible LLM fallback configuration, and a built-in benchmark workflow.
+OpenAI-compatible LLM fallback configuration, and an explicit-input benchmark workflow.
 
 The repository also includes thesis support artifacts: demo screenshot,
 offline/live experiment tables, and success/failure case analysis. Larger
@@ -35,8 +35,8 @@ The prototype should remain easy to demonstrate locally and should map directly 
 
 1. User chooses Create ProgramSpec for a new URL or Run ProgramSpec for a
    verified reusable version.
-2. In create mode, the user supplies a URL and optional HTML. Built-in schemas
-   are not sent unless the user explicitly enables a schema override.
+2. In create mode, the user supplies a URL and optional HTML. No runtime domain
+   schema is selected unless the user explicitly supplies a schema override.
 3. Backend runs the LangGraph extraction workflow.
 4. Page collection captures rendered HTML, normalized text, and text blocks.
 5. SchemaAgent infers a page-specific `SchemaSpec` when no explicit schema is

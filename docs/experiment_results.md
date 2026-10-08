@@ -2,7 +2,8 @@
 
 ## Dataset
 
-The built-in benchmark currently contains 9 checked-in Chinese HTML fixtures: 3 university notices, 3 job postings, and 3 government-policy pages.
+The checked-in benchmark dataset contains 9 Chinese HTML fixtures: 3 university notices, 3 job postings, and 3 government-policy pages.
+Each item carries its Schema explicitly; these fixtures are not runtime built-in Schema templates.
 This exported table was generated in offline mode with LLM credentials disabled, so LLM-only methods fail explicitly instead of producing synthetic values.
 
 ## Benchmark Summary
@@ -44,7 +45,7 @@ Synthetic required-field sample demonstrates the explicit fallback-failure path 
 | Field | Value | Status | Strategy | Evidence Count | Error |
 | --- | --- | --- | --- | ---: | --- |
 | title | 测试通知 | extracted | css | 1 |  |
-| approval_code |  | fallback_failed | none | 0 | LLM fallback requires DEEPSEEK_API_KEY or LLM_API_KEY |
+| approval_code |  | fallback_failed | none | 0 | LLM fallback requires model.api_key in config.toml |
 
 ## Analysis Notes
 
