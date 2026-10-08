@@ -78,7 +78,12 @@ def add_body_fallback_programs(
     for field in schema_spec.fields:
         if not _is_body_field(field.name):
             continue
-        if any(item.field_name == field.name for item in programs):
+        if any(
+            item.field_name == field.name
+            and item.strategy in {"css", "xpath"}
+            and bool(item.selector)
+            for item in programs
+        ):
             continue
         for candidate in body_selection.candidates:
             if not candidate.selector:

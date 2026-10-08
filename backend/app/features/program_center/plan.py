@@ -134,6 +134,20 @@ def _title_programs(field_name: str) -> list[FieldProgramSpec]:
             selector="h1",
             postprocess=["strip", "normalize_whitespace"],
         ),
+        FieldProgramSpec(
+            field_name=field_name,
+            strategy="css",
+            enabled=True,
+            selector="*[class*='title'] h2",
+            postprocess=["strip", "normalize_whitespace"],
+        ),
+        FieldProgramSpec(
+            field_name=field_name,
+            strategy="css",
+            enabled=True,
+            selector="*[class*='title'] h3",
+            postprocess=["strip", "normalize_whitespace"],
+        ),
     ]
 
 
