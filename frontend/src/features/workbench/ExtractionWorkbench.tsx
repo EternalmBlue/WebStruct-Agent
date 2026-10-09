@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowClockwise,
   Check,
@@ -13,6 +13,7 @@ import {
 import { runFieldValueAssist } from "../../api/webstructApi";
 import { appendEmptyField, updateField } from "../../lib/schemaDraft";
 import { formatValue } from "../../lib/formatters";
+import { prepareSnapshotDocument } from "../../lib/snapshotDocument";
 import type {
   ExtractionResponse,
   FieldExtractionResult,
@@ -57,6 +58,7 @@ export function ExtractionWorkbench({
   );
   const [archivedFields, setArchivedFields] = useState<FieldSpec[]>([]);
   const [schemaMessage, setSchemaMessage] = useState("");
+  const [snapshotPreviewReady, setSnapshotPreviewReady] = useState(false);
   const [valueStates, setValueStates] = useState<Record<string, FieldValueState>>(
     {},
   );
@@ -76,10 +78,32 @@ export function ExtractionWorkbench({
   ) ?? schema.fields[0];
   const activeResult = activeField ? resultsByName.get(activeField.name) : undefined;
   const activeEvidence = activeResult?.evidence[0];
+  const selectedBody = extraction.view_bundle?.metadata?.body_selection as
+    | { accepted?: boolean; text?: string }
+    | undefined;
   const snapshotText =
+    (selectedBody?.accepted && selectedBody.text?.trim()) ||
     extraction.view_bundle?.text ||
     extraction.view_bundle?.lines?.join("\n") ||
     "当前任务没有可展示的页面文本快照。";
+  const rawSnapshotHtml = extraction.view_bundle?.raw_html?.trim() ?? "";
+  const snapshotUrl = extraction.view_bundle?.url || "HTML 输入";
+  const snapshotDocument = useMemo(
+    () => prepareSnapshotDocument(rawSnapshotHtml, snapshotUrl),
+    [rawSnapshotHtml, snapshotUrl],
+  );
+
+  useEffect(() => {
+    setSnapshotPreviewReady(false);
+  }, [snapshotDocument]);
+
+  function handleSnapshotLoad(event: React.SyntheticEvent<HTMLIFrameElement>) {
+    const bodyText = event.currentTarget.contentDocument?.body?.innerText?.trim() ?? "";
+    const expectedText = snapshotText.trim();
+    const minimumText = Math.max(40, expectedText.length * 0.2);
+    const enoughText = bodyText.length >= minimumText;
+    setSnapshotPreviewReady(enoughText);
+  }
   const visibleFields = schema.fields.filter(
     (field) =>
       !archivedFields.some((archivedField) => archivedField.name === field.name),
@@ -198,22 +222,28 @@ export function ExtractionWorkbench({
               <p className="panel-kicker">CLOAKBROWSER SNAPSHOT</p>
               <h3>{extraction.view_bundle?.title || "当前页面"}</h3>
             </div>
-            <span className="snapshot-url">
-              {extraction.view_bundle?.url || "HTML 输入"}
-            </span>
+            <span className="snapshot-url">{snapshotUrl}</span>
           </div>
-          {extraction.view_bundle?.raw_html ? (
+          {snapshotDocument ? (
             <iframe
+              key={snapshotDocument}
               className="snapshot-frame"
               title="CloakBrowser 页面快照"
-              sandbox=""
-              srcDoc={extraction.view_bundle.raw_html}
+              sandbox="allow-same-origin"
+              srcDoc={snapshotDocument}
+              onLoad={handleSnapshotLoad}
             />
           ) : (
             <div className="snapshot-frame snapshot-frame-empty">
               页面没有返回可渲染 HTML，使用下方文本证据视图。
             </div>
           )}
+          {snapshotDocument && !snapshotPreviewReady ? (
+            <div className="snapshot-text-fallback" aria-label="文本快照">
+              <strong>文本快照</strong>
+              <p>{snapshotText}</p>
+            </div>
+          ) : null}
           <div className="evidence-focus">
             <div className="evidence-focus-heading">
               <strong>引用出处高亮</strong>

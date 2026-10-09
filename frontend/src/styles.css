@@ -1363,6 +1363,33 @@ h2 {
   text-align: center;
 }
 
+.snapshot-text-fallback {
+  max-height: 220px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid #c5d8dc;
+  border-radius: 6px;
+  background: #f7fbfb;
+  color: var(--ink);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.snapshot-text-fallback strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.snapshot-text-fallback p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
 .evidence-focus {
   margin-top: 12px;
   padding: 12px;
