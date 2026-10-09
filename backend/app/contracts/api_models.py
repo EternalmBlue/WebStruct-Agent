@@ -4,10 +4,10 @@ from pydantic import BaseModel, Field
 
 from app.contracts.benchmark import BenchmarkDataset, BenchmarkReport
 from app.contracts.evidence import EvidenceBundle, VerificationReport
-from app.contracts.extraction import ExtractionPlan, ExtractionResult
+from app.contracts.extraction import ExtractionPlan, ExtractionResult, FieldExtractionResult
 from app.contracts.page import PageObservation, ViewBundle
 from app.contracts.program import ProgramSpec
-from app.contracts.schema import SchemaSpec
+from app.contracts.schema import FieldSpec, SchemaSpec
 from app.contracts.trace import AgentRunTrace
 
 
@@ -97,3 +97,17 @@ class SpecAssistantResponse(BaseModel):
     program_spec: ProgramSpec
     change_summary: list[str] = Field(default_factory=list)
     validation_issues: list[str] = Field(default_factory=list)
+
+
+class FieldValueAssistRequest(BaseModel):
+    task_id: str
+    field: FieldSpec
+    field_name: str
+    guidance_value: str = ""
+
+
+class FieldValueAssistResponse(BaseModel):
+    task_id: str
+    field_name: str
+    result: FieldExtractionResult
+    assistant_message: str = ""

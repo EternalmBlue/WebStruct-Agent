@@ -40,6 +40,7 @@ class UnconfiguredModelAdapter:
         self,
         field: FieldSpec,
         view_bundle: ViewBundle,
+        guidance_value: str = "",
     ) -> tuple[str | None, FieldEvidence | None]:
         raise MissingModelConfigurationError(self.reason)
 
@@ -52,4 +53,23 @@ class UnconfiguredModelAdapter:
         fallback_program_spec: ProgramSpec,
         view_bundle: ViewBundle,
     ) -> tuple[str, SchemaSpec, ProgramSpec, list[str], list[str]]:
+        raise MissingModelConfigurationError(self.reason)
+
+    def revise_field_schema(
+        self,
+        *,
+        view_bundle: ViewBundle,
+        current_schema_spec: SchemaSpec,
+        user_message: str,
+    ) -> SchemaSpec:
+        raise MissingModelConfigurationError(self.reason)
+
+    def revise_field_value(
+        self,
+        *,
+        field: FieldSpec,
+        view_bundle: ViewBundle,
+        guidance_value: str = "",
+        evidence_text: str = "",
+    ):
         raise MissingModelConfigurationError(self.reason)
