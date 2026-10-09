@@ -210,13 +210,17 @@ The compose stack starts, with dependency gating by healthcheck:
 - `backend`: FastAPI service on `http://127.0.0.1:8000` (waits for healthy postgres)
 - `frontend`: Nginx static frontend on `http://127.0.0.1:5173` (waits for healthy backend),
   proxying `/api` to backend
+- `cloakbrowser_cache`: persistent pinned CloakBrowser binary cache, so a backend
+  container restart does not trigger another download
 
 Both images ship a
 `.dockerignore` so local `.venv`, `node_modules`, caches, logs, and tests never enter the
 build context.
 
 For Docker, mount the same local `config.toml` read-only and set the desired database
-and model values there.
+and model values there. The backend image includes the Chromium runtime libraries
+required by CloakBrowser; when the container runs as root it adds only the standard
+Chromium `--no-sandbox` compatibility flags.
 
 ## Core APIs
 
