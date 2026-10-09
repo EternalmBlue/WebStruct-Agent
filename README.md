@@ -90,6 +90,24 @@ frontend/src/
   types/        shared WebStruct TypeScript contracts
 ```
 
+## Snapshot Rule Builder
+
+Create mode moves from URL-first extraction into a two-column snapshot workspace.
+`FieldSchemaAgent` proposes only the active field set, while `FieldValueAgent`
+works on one field at a time and returns value, page evidence, and a safe
+field-local ProgramSpec. Field edits never re-collect the page. The quality
+check replays the candidate against the saved snapshot and can optionally
+validate a different same-origin page with the same structure before a rule is
+marked verified.
+
+The collaboration endpoints are:
+
+```text
+POST /api/spec-assistant/fields/schema
+POST /api/spec-assistant/fields/value
+POST /api/spec-assistant/fields/check
+```
+
 Test layout:
 
 ```text

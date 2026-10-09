@@ -17,8 +17,10 @@ import {
   pollExtractionRun,
   pollBenchmarkRun,
   reviseSpecWithAssistant,
+  runBuilderCheck,
   runBenchmarkRequest,
   runExtractionRequest,
+  runFieldSchemaAssist,
   submitManualReviewRequest,
 } from "../api/webstructApi";
 import { AgentTracePanel } from "../features/extraction/AgentTracePanel";
@@ -33,6 +35,8 @@ import { RunStateBadge } from "../features/extraction/RunStateBadge";
 import { VerificationReportPanel } from "../features/verification/VerificationReportPanel";
 import { WorkflowRail } from "../features/extraction/WorkflowRail";
 import { RunMetricsPanel } from "../features/extraction/RunMetricsPanel";
+import { ExtractionWorkbench } from "../features/workbench/ExtractionWorkbench";
+import { BuilderQualityPanel } from "../features/workbench/BuilderQualityPanel";
 import { sampleHtml } from "../lib/sampleHtml";
 import {
   appendEmptyField,
@@ -98,6 +102,14 @@ export function Dashboard() {
   const [schemaDrawerOpen, setSchemaDrawerOpen] = useState(false);
   const [reuseVerifiedProgram, setReuseVerifiedProgram] = useState(false);
   const [workMode, setWorkMode] = useState<WorkMode>("create");
+  const [fieldSchemaAssistState, setFieldSchemaAssistState] =
+    useState<RunState>("idle");
+  const [fieldSchemaAssistMessage, setFieldSchemaAssistMessage] = useState("");
+  const [builderStep, setBuilderStep] = useState<"input" | "workbench" | "quality" | "preview">("input");
+  const [builderCheckState, setBuilderCheckState] = useState<RunState>("idle");
+  const [builderCheckMessage, setBuilderCheckMessage] = useState("");
+  const [secondUrl, setSecondUrl] = useState("");
+  const [fieldGuidance, setFieldGuidance] = useState<Record<string, string>>({});
 
   async function refreshVerifiedProgramSpecs() {
     const verifiedProgramData = await loadVerifiedProgramSpecs();
@@ -157,6 +169,8 @@ export function Dashboard() {
       setReuseVerifiedProgram(false);
     }
     setSchemaDrawerOpen(false);
+    setFieldSchemaAssistState("idle");
+    setFieldSchemaAssistMessage("");
   }, [workMode]);
 
   useEffect(() => {
@@ -252,6 +266,7 @@ export function Dashboard() {
         setReviewFields(toReviewFields(data));
         setRuleName(defaultRuleName(data));
         setRunState(data.status === "failed" ? "failed" : "done");
+        setBuilderStep(data.status === "failed" ? "input" : "workbench");
         window.localStorage.removeItem("webstruct.activeTask");
         window.localStorage.removeItem("webstruct.activeTaskId");
       })
@@ -260,6 +275,22 @@ export function Dashboard() {
         setError("状态暂未更新，已保留上次任务数据。");
       });
   }, []);
+
+  useEffect(() => {
+    const savedStep = window.localStorage.getItem("webstruct.builderStep");
+    if (
+      savedStep === "input" ||
+      savedStep === "workbench" ||
+      savedStep === "quality" ||
+      savedStep === "preview"
+    ) {
+      setBuilderStep(savedStep);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("webstruct.builderStep", builderStep);
+  }, [builderStep]);
 
   useEffect(() => {
     if (workMode === "run") {
@@ -415,6 +446,7 @@ export function Dashboard() {
       setRunState(data.errors.length ? "failed" : "done");
       window.localStorage.removeItem("webstruct.activeTaskId");
       window.localStorage.removeItem("webstruct.activeTask");
+      setBuilderStep("workbench");
     } catch (currentError) {
       setRunState("failed");
       setError(currentError instanceof Error ? currentError.message : "抽取失败");
@@ -522,6 +554,139 @@ export function Dashboard() {
         currentError instanceof Error ? currentError.message : "Spec 协作失败";
       setAssistantError(message);
       setAssistantActionNotice({ tone: "error", message });
+    }
+  }
+
+  async function collaborateOnFieldSchema(message: string) {
+    if (!extraction || !extraction.schema_spec || !message.trim() || workMode !== "create") {
+      return;
+    }
+    setFieldSchemaAssistState("running");
+    setBuilderCheckState("idle");
+    setBuilderCheckMessage("");
+    setFieldSchemaAssistMessage("");
+    try {
+      const data = await runFieldSchemaAssist({
+        taskId: extraction.task_id,
+        schema: extraction.schema_spec,
+        message,
+      });
+      setExtraction((current) =>
+        current
+          ? {
+              ...current,
+              schema_spec: data.schema_spec,
+            }
+          : current,
+      );
+      setReviewFields(
+        toReviewFields({
+          ...extraction,
+          schema_spec: data.schema_spec,
+        }),
+      );
+      setFieldSchemaAssistState("done");
+      setFieldSchemaAssistMessage("字段方案已更新。请逐个协作新增或变更字段的值。");
+    } catch (currentError) {
+      setFieldSchemaAssistState("failed");
+      setFieldSchemaAssistMessage(
+        currentError instanceof Error ? currentError.message : "字段方案协作失败",
+      );
+    }
+  }
+
+  function updateWorkbenchSchema(nextSchema: SchemaSpec) {
+    setBuilderCheckState("idle");
+    setBuilderCheckMessage("");
+    setExtraction((current) =>
+      current
+        ? {
+            ...current,
+            schema_spec: nextSchema,
+          }
+        : current,
+    );
+    setReviewFields((current) => {
+      const values = new Map(current.map((field) => [field.field_name, field]));
+      return nextSchema.fields.map((field) => ({
+        field_name: field.name,
+        value: values.get(field.name)?.value ?? "",
+        accepted: values.get(field.name)?.accepted ?? false,
+        note: values.get(field.name)?.note ?? "",
+      }));
+    });
+  }
+
+  function updateWorkbenchFieldResult(result: NonNullable<ExtractionResponse["extraction_result"]>["fields"][number]) {
+    setBuilderCheckState("idle");
+    setBuilderCheckMessage("");
+    setExtraction((current) =>
+      current?.extraction_result
+        ? {
+            ...current,
+            extraction_result: {
+              ...current.extraction_result,
+              fields: current.extraction_result.fields.map((field) =>
+                field.field_name === result.field_name ? result : field,
+              ),
+            },
+          }
+        : current,
+    );
+  }
+
+  function updateWorkbenchFieldProgram(
+    fieldName: string,
+    programs: NonNullable<ExtractionResponse["program_spec"]>["field_programs"],
+  ) {
+    setBuilderCheckState("idle");
+    setBuilderCheckMessage("");
+    setExtraction((current) =>
+      current?.program_spec
+        ? {
+            ...current,
+            program_spec: {
+              ...current.program_spec,
+              field_programs: [
+                ...current.program_spec.field_programs.filter(
+                  (program) => program.field_name !== fieldName,
+                ),
+                ...programs,
+              ],
+            },
+          }
+        : current,
+    );
+  }
+
+  async function checkBuilder() {
+    if (!extraction?.schema_spec || !extraction.program_spec) return;
+    setBuilderCheckState("running");
+    setBuilderCheckMessage("");
+    try {
+      const data = await runBuilderCheck({
+        taskId: extraction.task_id,
+        schema: extraction.schema_spec,
+        programSpec: extraction.program_spec,
+        expectedValues: fieldGuidance,
+        secondUrl,
+      });
+      setExtraction(data.extraction);
+      setReviewFields(toReviewFields(data.extraction));
+      setBuilderCheckState("done");
+      setBuilderCheckMessage(
+        data.extraction.verification_report?.passed
+          ? "当前字段方案和规则已在快照上通过检查。"
+          : "检查完成，仍有问题需要修订。",
+      );
+      if (data.extraction.verification_report?.passed) {
+        setBuilderStep("quality");
+      }
+    } catch (currentError) {
+      setBuilderCheckState("failed");
+      setBuilderCheckMessage(
+        currentError instanceof Error ? currentError.message : "质量检查失败",
+      );
     }
   }
 
@@ -1000,6 +1165,42 @@ export function Dashboard() {
             </section>
           ) : null}
 
+          {isCreateMode && extraction ? (
+            <nav className="builder-step-nav" aria-label="规则构建步骤">
+              {([
+                ["workbench", "字段协作"],
+                ["quality", "质量检查"],
+                ["preview", "规则预览"],
+              ] as const).map(([step, label], index) => (
+                <button
+                  key={step}
+                  type="button"
+                  className={`builder-step-button${builderStep === step ? " builder-step-button-active" : ""}`}
+                  onClick={() => {
+                    if (step === "quality" && builderStep === "workbench") {
+                      setBuilderStep("quality");
+                    } else if (
+                      step === "preview" &&
+                      builderCheckState === "done" &&
+                      extraction.verification_report?.passed
+                    ) {
+                      setBuilderStep("preview");
+                    } else if (step === "workbench") {
+                      setBuilderStep("workbench");
+                    }
+                  }}
+                  disabled={
+                    step === "preview" &&
+                    (builderCheckState !== "done" || !extraction.verification_report?.passed)
+                  }
+                >
+                  <strong>{index + 1}</strong>
+                  {label}
+                </button>
+              ))}
+            </nav>
+          ) : null}
+
           {runState === "running" || extraction ? (
             <details className="workflow-drawer">
               <summary>
@@ -1013,7 +1214,52 @@ export function Dashboard() {
 
           {runState === "running" || extraction ? (
             <section className="results-grid" aria-label="抽取输出">
-              <ExtractionResultsPanel
+              {isCreateMode && extraction?.schema_spec ? (
+                builderStep === "workbench" ? <ExtractionWorkbench
+                  extraction={extraction}
+                  schema={extraction.schema_spec}
+                  onSchemaChange={updateWorkbenchSchema}
+                  onSchemaAssist={collaborateOnFieldSchema}
+                  schemaAssistState={fieldSchemaAssistState}
+                  schemaAssistMessage={fieldSchemaAssistMessage}
+                  onFieldResult={updateWorkbenchFieldResult}
+                  onFieldProgram={updateWorkbenchFieldProgram}
+                  onCheck={() => setBuilderStep("quality")}
+                  onGuidanceChange={(fieldName, guidance) =>
+                    setFieldGuidance((current) => ({ ...current, [fieldName]: guidance }))
+                  }
+                /> : null
+              ) : null}
+              {builderStep === "quality" && isCreateMode && extraction ? (
+                <BuilderQualityPanel
+                  extraction={extraction}
+                  secondUrl={secondUrl}
+                  setSecondUrl={setSecondUrl}
+                  state={builderCheckState}
+                  message={builderCheckMessage}
+                  onCheck={checkBuilder}
+                  onPreview={() => setBuilderStep("preview")}
+                  canPreview={builderCheckState === "done" && Boolean(extraction.verification_report?.passed)}
+                />
+              ) : null}
+              {builderStep === "preview" && isCreateMode && extraction ? (
+                <section className="panel builder-preview-panel">
+                  <div className="panel-heading">
+                    <div>
+                      <p className="panel-kicker">RULE PREVIEW</p>
+                      <h2>规则预览</h2>
+                    </div>
+                    <button className="button-secondary" type="button" onClick={() => setBuilderStep("quality")}>
+                      返回质量检查
+                    </button>
+                  </div>
+                  <ProgramSpecPreviewPanel
+                    programSpec={extraction.program_spec}
+                    schemaSpec={extraction.schema_spec}
+                  />
+                </section>
+              ) : null}
+              {(!isCreateMode || builderStep === "quality") ? <ExtractionResultsPanel
                 extraction={extraction}
                 fieldsByName={fieldsByName}
                 isRunning={runState === "running"}
@@ -1035,7 +1281,7 @@ export function Dashboard() {
                 onApplyAssistantDraft={applyAssistantDraft}
                 onRerunWithAssistantDraft={rerunWithAssistantDraft}
                 assistantActionNotice={assistantActionNotice}
-              />
+              /> : null}
               {isRunMode ? (
                 <section className="panel run-readonly-panel">
                   <div className="panel-heading">
@@ -1056,14 +1302,14 @@ export function Dashboard() {
                   </p>
                 </section>
               ) : null}
-              <VerificationReportPanel
+              {(!isCreateMode || builderStep === "quality") ? <VerificationReportPanel
                 extraction={extraction}
                 isRunning={runState === "running"}
                 onOpenSpecAssistant={
                   isCreateMode ? () => setAssistantOpen(true) : undefined
                 }
-              />
-              {isCreateMode ? (
+              /> : null}
+              {isCreateMode && builderStep === "quality" ? (
                 <ManualReviewPanel
                   extraction={extraction}
                   reviewFields={reviewFields}
@@ -1077,11 +1323,12 @@ export function Dashboard() {
                   onSubmitReview={submitReview}
                 />
               ) : null}
-              <ProgramSpecPreviewPanel
+              {isRunMode ? <ProgramSpecPreviewPanel
                 programSpec={extraction?.program_spec}
                 schemaSpec={extraction?.schema_spec}
                 validationIssues={extraction?.program_validation_issues}
               />
+              : null}
             </section>
           ) : null}
 

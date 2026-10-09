@@ -14,6 +14,16 @@ from app.contracts.api_models import (
     ManualReviewResponse,
     SpecAssistantRequest,
     SpecAssistantResponse,
+    FieldValueAssistRequest,
+    FieldValueAssistResponse,
+)
+from app.contracts.builder import (
+    BuilderCheckRequest,
+    BuilderCheckResponse,
+    SchemaCollaborationRequest,
+    SchemaCollaborationResponse,
+    ValueCollaborationRequest,
+    ValueCollaborationResponse,
 )
 from app.contracts.benchmark import (
     BenchmarkDataset,
@@ -70,6 +80,8 @@ __all__ = [
     "RSIIterationResponse",
     "BenchmarkRequest",
     "BenchmarkResponse",
+    "BuilderCheckRequest",
+    "BuilderCheckResponse",
     "EvidenceBundle",
     "ExtractionPlan",
     "ExtractionRequest",
@@ -95,7 +107,13 @@ __all__ = [
     "SpecAssistantRequest",
     "SpecAssistantResponse",
     "StructureCompatibility",
+    "FieldValueAssistRequest",
+    "FieldValueAssistResponse",
     "VerificationIssue",
     "VerificationReport",
     "ViewBundle",
+    "SchemaCollaborationRequest",
+    "SchemaCollaborationResponse",
+    "ValueCollaborationRequest",
+    "ValueCollaborationResponse",
 ]

@@ -11,6 +11,7 @@ import httpx
 from app.contracts import (
     ExtractionPlan,
     FieldEvidence,
+    FieldExtractionResult,
     FieldSpec,
     ProgramSpec,
     SchemaSpec,
@@ -108,8 +109,9 @@ class OpenAICompatibleModelAdapter:
         self,
         field: FieldSpec,
         view_bundle: ViewBundle,
+        guidance_value: str = "",
     ) -> tuple[str | None, FieldEvidence | None]:
-        payload = self._build_payload(field, view_bundle)
+        payload = self._build_payload(field, view_bundle, guidance_value=guidance_value)
         with model_operation("field_extraction", field.name):
             response_data = self._post_chat_completion(payload)
         parsed = _parse_json_content(response_data)
@@ -203,7 +205,13 @@ class OpenAICompatibleModelAdapter:
             validation_issues,
         )
 
-    def _build_payload(self, field: FieldSpec, view_bundle: ViewBundle) -> dict[str, object]:
+    def _build_payload(
+        self,
+        field: FieldSpec,
+        view_bundle: ViewBundle,
+        *,
+        guidance_value: str = "",
+    ) -> dict[str, object]:
         page_text = view_bundle.text[:MAX_LLM_TEXT_CHARS]
         field_payload = {
             "name": field.name,
@@ -219,9 +227,90 @@ class OpenAICompatibleModelAdapter:
             "Do not infer facts that are not supported by evidence. The evidence_text "
             "must be an exact substring from the page text whenever possible."
         )
+        guidance = (
+            f"User reference value for this field (use it only to locate the matching "
+            f"page evidence, never copy it when absent): {guidance_value[:1000]}\n\n"
+            if guidance_value.strip()
+            else ""
+        )
+
+    def revise_field_schema(
+        self,
+        *,
+        view_bundle: ViewBundle,
+        current_schema_spec: SchemaSpec,
+        user_message: str,
+    ) -> SchemaSpec:
+        payload = self._build_field_schema_payload(
+            view_bundle=view_bundle,
+            current_schema_spec=current_schema_spec,
+            user_message=user_message,
+        )
+        parsed = _parse_json_content(self._post_chat_completion(payload))
+        return _sanitize_schema_spec(parsed.get("schema_spec", parsed), view_bundle=view_bundle)
+
+    def revise_field_value(
+        self,
+        *,
+        field: FieldSpec,
+        view_bundle: ViewBundle,
+        guidance_value: str = "",
+        evidence_text: str = "",
+    ) -> tuple[FieldExtractionResult, ProgramSpec]:
+        payload = self._build_field_value_payload(
+            field=field,
+            view_bundle=view_bundle,
+            guidance_value=guidance_value,
+            evidence_text=evidence_text,
+        )
+        parsed = _parse_json_content(self._post_chat_completion(payload))
+        value = parsed.get("value")
+        if value in (None, "") or parsed.get("abstain") is True:
+            value = None
+        else:
+            value = normalize_whitespace(str(value))
+            if field.type == "date":
+                value = normalize_date(value)
+        evidence_value = normalize_whitespace(str(parsed.get("evidence_text") or value or ""))
+        start = view_bundle.text.find(evidence_value) if evidence_value else -1
+        evidence = (
+            FieldEvidence(
+                field_name=field.name,
+                source="llm_fallback",
+                text=evidence_value,
+                start_char=start if start >= 0 else None,
+                end_char=start + len(evidence_value) if start >= 0 else None,
+                score=max(0.0, min(1.0, float(parsed.get("confidence", 0.55)))),
+            )
+            if value is not None and evidence_value and start >= 0
+            else None
+        )
+        result = FieldExtractionResult(
+            field_name=field.name,
+            value=value,
+            normalized_value=value,
+            confidence=evidence.score if evidence else 0.0,
+            evidence=[evidence] if evidence else [],
+            strategy="llm_fallback" if evidence else "none",
+            status="extracted" if value is not None and evidence else "missing",
+        )
+        fallback = build_program_spec(
+            build_extraction_plan(SchemaSpec(name="field", fields=[field]))
+        )
+        candidate = parsed.get("program_spec")
+        safe, _ = sanitize_candidate_field_programs(
+            candidate if isinstance(candidate, dict) else {},
+            schema_spec=SchemaSpec(name="field", fields=[field]),
+        )
+        return result, merge_program_specs(
+            preferred_program_spec=ProgramSpec(field_programs=safe),
+            fallback_program_spec=fallback,
+            schema_spec=SchemaSpec(name="field", fields=[field]),
+        )
         user_prompt = (
             "Extract one field from this page.\n\n"
             f"FieldSpec JSON:\n{json.dumps(field_payload, ensure_ascii=False)}\n\n"
+            f"{guidance}"
             f"Page title: {view_bundle.title}\n"
             f"Page URL: {view_bundle.url}\n\n"
             f"Page text:\n{page_text}\n\n"
@@ -428,6 +517,78 @@ class OpenAICompatibleModelAdapter:
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0,
+            "stream": False,
+        }
+
+    def _build_field_schema_payload(
+        self,
+        *,
+        view_bundle: ViewBundle,
+        current_schema_spec: SchemaSpec,
+        user_message: str,
+    ) -> dict[str, object]:
+        return {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are FieldSchemaAgent. Change only the field set for the "
+                        "current page. Return JSON with one schema_spec key. Never "
+                        "return extracted values, selectors, regex or programs."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"User request:\n{user_message[:4000]}\n\n"
+                        f"Current schema:\n{json.dumps(current_schema_spec.model_dump(mode='json'), ensure_ascii=False)}\n\n"
+                        f"Page view:\n{json.dumps({'url': view_bundle.url, 'title': view_bundle.title, 'text': view_bundle.text[:MAX_SCHEMA_TEXT_CHARS]}, ensure_ascii=False)}\n\n"
+                        "Return schema_spec with name, description, domain and fields. "
+                        "Fields use name, description, type, required, aliases, examples."
+                    ),
+                },
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0,
+            "stream": False,
+        }
+
+    def _build_field_value_payload(
+        self,
+        *,
+        field: FieldSpec,
+        view_bundle: ViewBundle,
+        guidance_value: str,
+        evidence_text: str,
+    ) -> dict[str, object]:
+        return {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are FieldValueAgent. Extract exactly one field from the "
+                        "provided page. Return JSON only. Evidence must be an exact "
+                        "substring of page text. Do not invent values. Include a safe "
+                        "field-local ProgramSpec using only css, xpath, regex_on_text, "
+                        "text_near_label, llm_fallback."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Field:\n{json.dumps(field.model_dump(mode='json'), ensure_ascii=False)}\n\n"
+                        f"Guidance value:\n{guidance_value[:4000]}\n\n"
+                        f"Selected evidence:\n{evidence_text[:8000]}\n\n"
+                        f"Page text:\n{view_bundle.text[:MAX_LLM_TEXT_CHARS]}\n\n"
+                        "Return value, evidence_text, confidence, abstain, reason and "
+                        "program_spec.field_programs."
+                    ),
+                },
             ],
             "response_format": {"type": "json_object"},
             "temperature": 0,

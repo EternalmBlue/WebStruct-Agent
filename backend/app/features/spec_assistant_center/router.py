@@ -1,6 +1,9 @@
 from fastapi import APIRouter, HTTPException
 
 from app.contracts import (
+    FieldExtractionResult,
+    FieldValueAssistRequest,
+    FieldValueAssistResponse,
     FieldProgramSpec,
     ProgramSpec,
     SchemaSpec,
@@ -23,6 +26,8 @@ from app.platform.llm import (
 )
 
 router = APIRouter(prefix="/spec-assistant", tags=["spec-assistant"])
+
+from app.features.spec_assistant_center.builder import router as builder_router
 
 
 def _sanitize_program(
@@ -114,3 +119,68 @@ def revise_spec(request: SpecAssistantRequest) -> SpecAssistantResponse:
         change_summary=change_summary,
         validation_issues=validation_issues,
     )
+
+
+@router.post("/field-value", response_model=FieldValueAssistResponse)
+def assist_field_value(request: FieldValueAssistRequest) -> FieldValueAssistResponse:
+    """Run the value agent for one field against the existing page snapshot.
+
+    The snapshot is immutable for this task. A field retry therefore cannot
+    accidentally trigger a new browser read or change the schema agent's work.
+    """
+    payload = get_extraction_payload(request.task_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="extraction run not found")
+
+    view_bundle_payload = payload.get("view_bundle")
+    if not view_bundle_payload:
+        raise HTTPException(status_code=400, detail="view_bundle is required")
+    view_bundle = ViewBundle.model_validate(view_bundle_payload)
+
+    field = request.field.model_copy(
+        update={
+            "description": (
+                f"{request.field.description}\n"
+                f"Reference value from the current page: {request.guidance_value[:1000]}"
+            ).strip()
+        }
+    )
+    adapter = create_model_adapter(
+        api_key=settings.llm_api_key,
+        base_url=settings.llm_base_url,
+        model=settings.llm_model,
+        timeout_seconds=settings.llm_timeout_seconds,
+    )
+    try:
+        value, evidence = adapter.extract_field(
+            field,
+            view_bundle,
+            guidance_value=request.guidance_value,
+        )
+    except MissingModelConfigurationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ModelProviderError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    result = FieldExtractionResult(
+        field_name=request.field_name,
+        value=value,
+        normalized_value=value,
+        confidence=evidence.score if evidence else 0.0,
+        evidence=[evidence] if evidence else [],
+        strategy="llm_fallback" if evidence else "none",
+        status="extracted" if value not in (None, "") else "missing",
+    )
+    return FieldValueAssistResponse(
+        task_id=request.task_id,
+        field_name=request.field_name,
+        result=result,
+        assistant_message=(
+            "已根据当前页面快照和引导值重试该字段。"
+            if value not in (None, "")
+            else "当前页面快照没有找到足够证据，已保留字段为未命中。"
+        ),
+    )
+
+
+router.include_router(builder_router)
