@@ -203,12 +203,18 @@ class CloakBrowserAdapter:
             with _sdk_environment(str(self.binary_path())):
                 stage = "launch"
                 launch_started = time.perf_counter()
-                browser = module.launch(
-                    headless=True,
-                    license_key=settings.browser_license_key or None,
-                    browser_version=settings.browser_binary_version,
-                    timeout=settings.navigation_timeout_ms,
-                )
+                launch_kwargs = {
+                    "headless": True,
+                    "license_key": settings.browser_license_key or None,
+                    "browser_version": settings.browser_binary_version,
+                    "timeout": settings.navigation_timeout_ms,
+                }
+                # Chromium cannot use its sandbox when the container runs the
+                # backend as root. This is a container-runtime compatibility
+                # flag only; it does not alter the browser identity.
+                if platform.system() == "Linux" and getattr(os, "geteuid", lambda: -1)() == 0:
+                    launch_kwargs["args"] = ["--no-sandbox", "--disable-setuid-sandbox"]
+                browser = module.launch(**launch_kwargs)
                 probe["launch_latency_ms"] = round((time.perf_counter() - launch_started) * 1000, 3)
                 probe["launch_verified"] = True
                 try:
