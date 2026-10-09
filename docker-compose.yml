@@ -22,6 +22,7 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./config.toml:/app/config.toml:ro
+      - cloakbrowser_cache:/app/.browser-cache
     depends_on:
       postgres:
         condition: service_healthy
@@ -46,4 +47,5 @@ services:
     restart: unless-stopped
 
 volumes:
+  cloakbrowser_cache:
   postgres_data:
