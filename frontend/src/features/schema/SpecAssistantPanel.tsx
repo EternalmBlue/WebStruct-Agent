@@ -18,6 +18,8 @@ export function SpecAssistantPanel({
   onSend,
   onApply,
   onRerun,
+  isRerunning,
+  actionNotice,
 }: {
   extraction: ExtractionResponse | null;
   draft: SpecAssistantResponse | null;
@@ -30,6 +32,11 @@ export function SpecAssistantPanel({
   onSend: () => void;
   onApply: () => void;
   onRerun: () => void;
+  isRerunning: boolean;
+  actionNotice: {
+    tone: "info" | "success" | "error";
+    message: string;
+  } | null;
 }) {
   if (!extraction?.schema_spec) {
     return null;
@@ -70,7 +77,7 @@ export function SpecAssistantPanel({
                 className="primary-button"
                 type="button"
                 onClick={onSend}
-                disabled={!message.trim() || state === "running"}
+                disabled={!message.trim() || state === "running" || isRerunning}
               >
                 {state === "running" ? (
                   "修订中"
@@ -85,7 +92,7 @@ export function SpecAssistantPanel({
                 className="button-secondary"
                 type="button"
                 onClick={onApply}
-                disabled={!draft || state === "running"}
+                disabled={!draft || state === "running" || isRerunning}
               >
                 <CheckCircle size={15} weight="fill" />
                 替换当前草稿
@@ -94,12 +101,21 @@ export function SpecAssistantPanel({
                 className="button-secondary"
                 type="button"
                 onClick={onRerun}
-                disabled={!draft || state === "running"}
+                disabled={!draft || state === "running" || isRerunning}
               >
                 <Play size={15} weight="fill" />
-                用新规则重新运行
+                {isRerunning ? "重新运行中" : "用新规则重新运行"}
               </button>
             </div>
+            {actionNotice ? (
+              <p
+                className={`assistant-action-feedback assistant-action-feedback-${actionNotice.tone}`}
+                role="status"
+                aria-live="polite"
+              >
+                {actionNotice.message}
+              </p>
+            ) : null}
             {draft ? (
               <p className="assistant-hint">
                 替换草稿只更新字段和规则预览；重新运行才会重新计算抽取结果。

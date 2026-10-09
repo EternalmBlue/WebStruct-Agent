@@ -21,6 +21,7 @@ export function ExtractionResultsPanel({
   onSendAssistantMessage,
   onApplyAssistantDraft,
   onRerunWithAssistantDraft,
+  assistantActionNotice,
 }: {
   extraction: ExtractionResponse | null;
   fieldsByName: Map<string, FieldSpec>;
@@ -38,6 +39,10 @@ export function ExtractionResultsPanel({
   onSendAssistantMessage: () => void;
   onApplyAssistantDraft: () => void;
   onRerunWithAssistantDraft: () => void;
+  assistantActionNotice: {
+    tone: "info" | "success" | "error";
+    message: string;
+  } | null;
 }) {
   return (
     <section className="panel result-panel">
@@ -64,6 +69,8 @@ export function ExtractionResultsPanel({
             onSend={onSendAssistantMessage}
             onApply={onApplyAssistantDraft}
             onRerun={onRerunWithAssistantDraft}
+            isRerunning={isRunning}
+            actionNotice={assistantActionNotice}
           />
         ) : null}
       </div>

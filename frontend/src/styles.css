@@ -679,6 +679,29 @@ h2 {
   line-height: 1.5;
 }
 
+.assistant-action-feedback {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border: 1px solid #cbe1e4;
+  border-radius: 6px;
+  background: #f4fafb;
+  color: #245766;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.assistant-action-feedback-success {
+  border-color: #b8d8c5;
+  background: #f2fbf5;
+  color: var(--success);
+}
+
+.assistant-action-feedback-error {
+  border-color: #e0afa8;
+  background: #fff5f4;
+  color: var(--danger);
+}
+
 .inline-error {
   margin: 8px 0 0;
   color: var(--danger);

@@ -87,6 +87,10 @@ export function Dashboard() {
   const [assistantState, setAssistantState] = useState<RunState>("idle");
   const [assistantMessage, setAssistantMessage] = useState("");
   const [assistantError, setAssistantError] = useState("");
+  const [assistantActionNotice, setAssistantActionNotice] = useState<{
+    tone: "info" | "success" | "error";
+    message: string;
+  } | null>(null);
   const [assistantDraft, setAssistantDraft] =
     useState<SpecAssistantResponse | null>(null);
   const [error, setError] = useState("");
@@ -143,6 +147,7 @@ export function Dashboard() {
       setReuseVerifiedProgram(true);
       setAssistantDraft(null);
       setAssistantError("");
+      setAssistantActionNotice(null);
       setAssistantOpen(false);
       setReviewMessage("");
       setRuleName("");
@@ -406,6 +411,7 @@ export function Dashboard() {
       setReviewMessage("");
       setAssistantDraft(null);
       setAssistantError("");
+      setAssistantActionNotice(null);
       setRunState(data.errors.length ? "failed" : "done");
       window.localStorage.removeItem("webstruct.activeTaskId");
       window.localStorage.removeItem("webstruct.activeTask");
@@ -498,6 +504,7 @@ export function Dashboard() {
     }
     setAssistantState("running");
     setAssistantError("");
+    setAssistantActionNotice(null);
     try {
       const data = await reviseSpecWithAssistant({
         extraction,
@@ -505,11 +512,16 @@ export function Dashboard() {
       });
       setAssistantDraft(data);
       setAssistantState("done");
+      setAssistantActionNotice({
+        tone: "success",
+        message: "修订建议已生成，请先替换当前草稿，或直接用新规则重新运行。",
+      });
     } catch (currentError) {
       setAssistantState("failed");
-      setAssistantError(
-        currentError instanceof Error ? currentError.message : "Spec 协作失败"
-      );
+      const message =
+        currentError instanceof Error ? currentError.message : "Spec 协作失败";
+      setAssistantError(message);
+      setAssistantActionNotice({ tone: "error", message });
     }
   }
 
@@ -538,6 +550,10 @@ export function Dashboard() {
     }));
     setMarkProgramVerified(false);
     setReviewMessage("");
+    setAssistantActionNotice({
+      tone: "success",
+      message: "已替换当前草稿。当前表格仍是上一轮结果，请点击“用新规则重新运行”刷新抽取结果。",
+    });
   }
 
   async function rerunWithAssistantDraft() {
@@ -552,6 +568,11 @@ export function Dashboard() {
       : extraction.view_bundle?.raw_html ?? "";
     setRunState("running");
     setError("");
+    setAssistantError("");
+    setAssistantActionNotice({
+      tone: "info",
+      message: "正在使用新的 Schema 与 ProgramSpec 重新抽取，请稍候。",
+    });
     try {
       const data = await runExtractionRequest({
         mode: "create",
@@ -562,6 +583,7 @@ export function Dashboard() {
       }, (snapshot) => {
         setRunSnapshot(snapshot);
         window.localStorage.setItem("webstruct.activeTaskId", snapshot.task_id);
+        setRunState(snapshot.status === "failed" ? "failed" : "running");
       });
       setExtraction(data);
       setReviewFields(toReviewFields(data));
@@ -569,10 +591,24 @@ export function Dashboard() {
       setMarkProgramVerified(false);
       setReviewMessage("");
       setRunState(data.errors.length ? "failed" : "done");
+      setAssistantActionNotice(
+        data.errors.length
+          ? {
+              tone: "error",
+              message: `重新抽取完成，但仍有 ${data.errors.length} 个运行错误，请查看运行进度与诊断。`,
+            }
+          : {
+              tone: "success",
+              message: "已使用新规则完成重新抽取，结果表和证据已刷新。",
+            },
+      );
       window.localStorage.removeItem("webstruct.activeTaskId");
     } catch (currentError) {
       setRunState("failed");
-      setError(currentError instanceof Error ? currentError.message : "重新抽取失败");
+      const message =
+        currentError instanceof Error ? currentError.message : "重新抽取失败";
+      setError(message);
+      setAssistantActionNotice({ tone: "error", message });
     }
   }
 
@@ -580,6 +616,7 @@ export function Dashboard() {
     setWorkMode("create");
     setAssistantDraft(null);
     setAssistantError("");
+    setAssistantActionNotice(null);
     setAssistantOpen(false);
     setReviewMessage("");
   }
@@ -997,6 +1034,7 @@ export function Dashboard() {
                 onSendAssistantMessage={sendAssistantMessage}
                 onApplyAssistantDraft={applyAssistantDraft}
                 onRerunWithAssistantDraft={rerunWithAssistantDraft}
+                assistantActionNotice={assistantActionNotice}
               />
               {isRunMode ? (
                 <section className="panel run-readonly-panel">
