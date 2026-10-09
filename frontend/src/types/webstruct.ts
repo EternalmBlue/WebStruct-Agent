@@ -204,6 +204,14 @@ export type SpecAssistantResponse = {
   validation_issues: string[];
 };
 
+export type FieldValueAssistResponse = {
+  task_id: string;
+  field_name: string;
+  result: FieldExtractionResult;
+  program_spec: ProgramSpecSummary;
+  assistant_message: string;
+};
+
 export type VerifiedProgramSpecSummary = {
   schema_signature: string;
   schema_name: string;

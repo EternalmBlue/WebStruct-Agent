@@ -2,6 +2,8 @@ import type {
   BenchmarkResponse,
   BenchmarkDataset,
   ExtractionResponse,
+  FieldValueAssistResponse,
+  FieldSpec,
   HealthStatus,
   ManualReviewResponse,
   ProgramSpecSummary,
@@ -162,6 +164,99 @@ export async function reviseSpecWithAssistant({
   const data = await readJsonResponse<SpecAssistantResponse & { detail?: string }>(
     response
   );
+  if (!response.ok) {
+    throw new Error(data.detail || `HTTP ${response.status}`);
+  }
+  return data;
+}
+
+export async function runFieldValueAssist({
+  taskId,
+  field,
+  guidanceValue,
+}: {
+  taskId: string;
+  field: FieldSpec;
+  guidanceValue: string;
+}): Promise<FieldValueAssistResponse> {
+  const response = await fetch("/api/spec-assistant/fields/value", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      task_id: taskId,
+      field,
+      guidance_value: guidanceValue,
+      evidence_text: "",
+    }),
+  });
+  const data = await readJsonResponse<FieldValueAssistResponse & { detail?: string }>(
+    response,
+  );
+  if (!response.ok) {
+    throw new Error(data.detail || `HTTP ${response.status}`);
+  }
+  return data;
+}
+
+export async function runBuilderCheck({
+  taskId,
+  schema,
+  programSpec,
+  expectedValues,
+  secondUrl,
+}: {
+  taskId: string;
+  schema: SchemaSpec;
+  programSpec: ProgramSpecSummary;
+  expectedValues: Record<string, string>;
+  secondUrl?: string;
+}): Promise<{ extraction: ExtractionResponse; second_page?: ExtractionResponse | null }> {
+  const response = await fetch("/api/spec-assistant/fields/check", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      task_id: taskId,
+      schema_spec: schema,
+      program_spec: programSpec,
+      expected_values: expectedValues,
+      second_url: secondUrl ?? "",
+    }),
+  });
+  const data = await readJsonResponse<{
+    extraction: ExtractionResponse;
+    second_page?: ExtractionResponse | null;
+    detail?: string;
+  }>(response);
+  if (!response.ok) {
+    throw new Error(data.detail || `HTTP ${response.status}`);
+  }
+  return data;
+}
+
+export async function runFieldSchemaAssist({
+  taskId,
+  schema,
+  message,
+}: {
+  taskId: string;
+  schema: SchemaSpec;
+  message: string;
+}): Promise<{ task_id: string; schema_spec: SchemaSpec; agent_traces: unknown[] }> {
+  const response = await fetch("/api/spec-assistant/fields/schema", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      task_id: taskId,
+      schema_spec: schema,
+      message,
+    }),
+  });
+  const data = await readJsonResponse<{
+    task_id: string;
+    schema_spec: SchemaSpec;
+    agent_traces: unknown[];
+    detail?: string;
+  }>(response);
   if (!response.ok) {
     throw new Error(data.detail || `HTTP ${response.status}`);
   }

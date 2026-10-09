@@ -9,6 +9,7 @@ from typing import Protocol
 from app.contracts import (
     ExtractionPlan,
     FieldEvidence,
+    FieldExtractionResult,
     FieldSpec,
     ProgramSpec,
     SchemaSpec,
@@ -38,6 +39,7 @@ class ModelAdapter(Protocol):
         self,
         field: FieldSpec,
         view_bundle: ViewBundle,
+        guidance_value: str = "",
     ) -> tuple[str | None, FieldEvidence | None]:
         """Return a structured field value and evidence without free-form chat state."""
 
@@ -51,6 +53,25 @@ class ModelAdapter(Protocol):
         view_bundle: ViewBundle,
     ) -> tuple[str, SchemaSpec, ProgramSpec, list[str], list[str]]:
         """Return a revised SchemaSpec and safe ProgramSpec for human AI collaboration."""
+
+    def revise_field_schema(
+        self,
+        *,
+        view_bundle: ViewBundle,
+        current_schema_spec: SchemaSpec,
+        user_message: str,
+    ) -> SchemaSpec:
+        """Return only a field-set proposal for the current page snapshot."""
+
+    def revise_field_value(
+        self,
+        *,
+        field: FieldSpec,
+        view_bundle: ViewBundle,
+        guidance_value: str = "",
+        evidence_text: str = "",
+    ) -> tuple[FieldExtractionResult, ProgramSpec]:
+        """Return one field value/evidence and its safe field-local program."""
 
 
 class MissingModelConfigurationError(RuntimeError):
